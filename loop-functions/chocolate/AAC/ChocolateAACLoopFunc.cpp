@@ -14,9 +14,9 @@
 /****************************************/
 
 ChocolateAACLoopFunction::ChocolateAACLoopFunction() {
-  m_fRadius = 0.3;
-  m_cCoordBlackSpot = CVector2(0,0.6);
-  m_cCoordWhiteSpot = CVector2(0,-0.6);
+  m_fRadius = 0.15;
+  m_cCoordBlackSpot = CVector2(0,0.2);
+  m_cCoordWhiteSpot = CVector2(0,-0.2);
   m_fObjectiveFunction = 0;
 }
 
@@ -104,6 +104,14 @@ CVector3 ChocolateAACLoopFunction::GetRandomPosition() {
   Real fPosY = b * m_fDistributionRadius * sin(2 * CRadians::PI.GetValue() * (a/b));
 
   return CVector3(fPosX, fPosY, 0);
+}
+
+/****************************************/
+/****************************************/
+
+void ChocolateAACLoopFunction::PostExperiment()
+{
+    LOG << m_fObjectiveFunction << std::endl;
 }
 
 REGISTER_LOOP_FUNCTIONS(ChocolateAACLoopFunction, "chocolate_aac_loop_functions");
