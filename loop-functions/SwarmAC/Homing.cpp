@@ -6,12 +6,12 @@
   * @license MIT License
   */
 
-#include "AggregationSingleSpot.h"
+#include "Homing.h"
 
 /****************************************/
 /****************************************/
 
-AggregationSingleSpot::AggregationSingleSpot() {
+Homing::Homing() {
   m_fRadius = 0.3;
   m_cCoordSpot1 = CVector2(0,-0.7);
   m_unScoreSpot1 = 0;
@@ -22,12 +22,12 @@ AggregationSingleSpot::AggregationSingleSpot() {
 /****************************************/
 /****************************************/
 
-AggregationSingleSpot::AggregationSingleSpot(const AggregationSingleSpot& orig) {}
+Homing::Homing(const Homing& orig) {}
 
 /****************************************/
 /****************************************/
 
-void AggregationSingleSpot::Init(TConfigurationNode& t_tree) {
+void Homing::Init(TConfigurationNode& t_tree) {
     CoreLoopFunctions::Init(t_tree);
     TConfigurationNode cParametersNode;
     try {
@@ -40,17 +40,17 @@ void AggregationSingleSpot::Init(TConfigurationNode& t_tree) {
 /****************************************/
 
 
-AggregationSingleSpot::~AggregationSingleSpot() {}
+Homing::~Homing() {}
 
 /****************************************/
 /****************************************/
 
-void AggregationSingleSpot::Destroy() {}
+void Homing::Destroy() {}
 
 /****************************************/
 /****************************************/
 
-argos::CColor AggregationSingleSpot::GetFloorColor(const argos::CVector2& c_position_on_plane) {
+argos::CColor Homing::GetFloorColor(const argos::CVector2& c_position_on_plane) {
   CVector2 vCurrentPoint(c_position_on_plane.GetX(), c_position_on_plane.GetY());
   Real d = (m_cCoordSpot1 - vCurrentPoint).Length();
   if (d <= m_fRadius) {
@@ -64,7 +64,7 @@ argos::CColor AggregationSingleSpot::GetFloorColor(const argos::CVector2& c_posi
 /****************************************/
 /****************************************/
 
-void AggregationSingleSpot::Reset() {
+void Homing::Reset() {
   m_fObjectiveFunction = 0;
   m_unScoreSpot1 = 0;
   CoreLoopFunctions::Reset();
@@ -73,13 +73,13 @@ void AggregationSingleSpot::Reset() {
 /****************************************/
 /****************************************/
 
-void AggregationSingleSpot::PostStep() {
+void Homing::PostStep() {
 }
 
 /****************************************/
 /****************************************/
 
-void AggregationSingleSpot::PostExperiment() {
+void Homing::PostExperiment() {
   CSpace::TMapPerType& tEpuckMap = GetSpace().GetEntitiesByType("epuck");
   CVector2 cEpuckPosition(0,0);
   for (CSpace::TMapPerType::iterator it = tEpuckMap.begin(); it != tEpuckMap.end(); ++it) {
@@ -100,14 +100,14 @@ void AggregationSingleSpot::PostExperiment() {
 /****************************************/
 /****************************************/
 
-Real AggregationSingleSpot::GetObjectiveFunction() {
+Real Homing::GetObjectiveFunction() {
   return m_fObjectiveFunction;
 }
 
 /****************************************/
 /****************************************/
 
-CVector3 AggregationSingleSpot::GetRandomPosition() {
+CVector3 Homing::GetRandomPosition() {
   Real temp, a, b, fPosX, fPosY;
   bool bPlaced = false;
   do {
@@ -129,4 +129,4 @@ CVector3 AggregationSingleSpot::GetRandomPosition() {
   return CVector3(fPosX, fPosY, 0);
 }
 
-REGISTER_LOOP_FUNCTIONS(AggregationSingleSpot, "aggregation_single");
+REGISTER_LOOP_FUNCTIONS(Homing, "homing");

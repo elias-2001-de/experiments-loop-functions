@@ -77,3 +77,11 @@ void CoreLoopFunctions::RemoveRobots() {
     RemoveEntity(id.str().c_str());
   }
 }
+
+void CoreLoopFunctions::SetPolicyPointer(shared_data* policy) {
+    m_policy = policy;
+}
+
+void CoreLoopFunctions::SetValuePointer(shared_data* value) {
+    m_value = value;
+}

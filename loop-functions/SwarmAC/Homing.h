@@ -7,8 +7,8 @@
   * @license MIT License
   */
 
-#ifndef AGGREGATION_SINGLE_SPOT
-#define AGGREGATION_SINGLE_SPOT
+#ifndef HOMING
+#define HOMING
 
 #include <argos3/core/simulator/space/space.h>
 #include <argos3/plugins/robots/e-puck/simulator/epuck_entity.h>
@@ -17,11 +17,11 @@
 
 using namespace argos;
 
-class AggregationSingleSpot: public CoreLoopFunctions {
+class Homing: public CoreLoopFunctions {
   public:
-    AggregationSingleSpot();
-    AggregationSingleSpot(const AggregationSingleSpot& orig);
-    virtual ~AggregationSingleSpot();
+    Homing();
+    Homing(const Homing& orig);
+    virtual ~Homing();
 
     virtual void Destroy();
     virtual void Init(TConfigurationNode& t_tree);

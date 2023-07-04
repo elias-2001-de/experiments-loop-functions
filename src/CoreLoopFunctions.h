@@ -1,5 +1,5 @@
 /*
- * @file <src/core/CoreLoopFunctions.h>
+ * @file <src/CoreLoopFunctions.h>
  *
  * @author Antoine Ligot - <aligot@ulb.ac.be>
  *
@@ -14,6 +14,9 @@
 #include <argos3/core/simulator/space/space.h>
 #include <argos3/core/simulator/loop_functions.h>
 #include <argos3/plugins/robots/e-puck/simulator/epuck_entity.h>
+
+// FIX not very clean
+#include "../../AC_trainer/src/shared_mem.h"
 
 using namespace argos;
 
@@ -50,6 +53,12 @@ class CoreLoopFunctions: public CLoopFunctions {
 
     CRandom::CRNG* m_pcRng;
 
+    /*
+     * The pointers to the shared memory containing the policy and the value
+     */
+    shared_data* m_policy;
+    shared_data* m_value;
+
   public:
     /*
      * Initialization method where the parameters of the loop function
@@ -71,6 +80,17 @@ class CoreLoopFunctions: public CLoopFunctions {
      * Returns the Behavioral characterization vector, for repertoire generation
      */
     virtual std::vector<Real> GetSDBC() {}; 
+
+    /*
+     * Sets the policy pointer
+     */
+    virtual void SetPolicyPointer(shared_data* policy);
+
+    /*
+     * Sets the value pointer
+     */ 
+    virtual void SetValuePointer(shared_data* value);
+
 
 };
 
