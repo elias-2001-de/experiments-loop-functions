@@ -30,6 +30,13 @@ AggregationTwoSpotsXOR2::AggregationTwoSpotsXOR2(const AggregationTwoSpotsXOR2& 
 
 void AggregationTwoSpotsXOR2::Init(TConfigurationNode& t_tree) {
     CoreLoopFunctions::Init(t_tree);
+
+    m_context = zmq::context_t(1);
+    m_socket_actor = zmq::socket_t(m_context, ZMQ_PUSH);
+    m_socket_actor.connect("tcp://localhost:5555");
+
+    m_socket_critic = zmq::socket_t(m_context, ZMQ_PUSH);
+    m_socket_critic.connect("tcp://localhost:5556");
 }
 
 /****************************************/
@@ -94,6 +101,20 @@ void AggregationTwoSpotsXOR2::PostStep() {
     }
     //LOG << "Sco1 = " << m_unScoreSpot1 << "Sco2 = " << m_unScoreSpot2 << std::endl;
     m_fObjectiveFunction += Max(m_unScoreSpot1, m_unScoreSpot2);
+
+    // send message to policy manager
+    Data data {{1, 2, 3}, {4, 5, 6}};
+    std::string serialized_data = serialize(data);
+
+    zmq::message_t message(serialized_data.size());
+    memcpy(message.data(), serialized_data.c_str(), serialized_data.size());
+
+    m_socket_actor.send(message, zmq::send_flags::dontwait);
+
+    message.rebuild(serialized_data.size());
+    memcpy(message.data(), serialized_data.c_str(), serialized_data.size());
+    m_socket_critic.send(message, zmq::send_flags::dontwait);
+
 }
 
 
