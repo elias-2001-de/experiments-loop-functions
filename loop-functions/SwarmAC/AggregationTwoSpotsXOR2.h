@@ -11,6 +11,7 @@
 #ifndef AGGREGATION_TWO_SPOTS_XOR2
 #define AGGREGATION_TWO_SPOTS_XOR2
 
+#include <torch/torch.h>
 #include <argos3/core/simulator/space/space.h>
 #include <argos3/plugins/robots/e-puck/simulator/epuck_entity.h>
 
@@ -53,19 +54,6 @@ class AggregationTwoSpotsXOR2: public CoreLoopFunctions {
 
 };
 
-// Define your data structure
-struct Data {
-    std::vector<int> vec1;
-    std::vector<int> vec2;
-};
 
-// Define your serialization function
-std::string serialize(const Data& data) {
-    std::stringstream ss;
-    std::copy(data.vec1.begin(), data.vec1.end(), std::ostream_iterator<int>(ss, " "));
-    ss << "\n";
-    std::copy(data.vec2.begin(), data.vec2.end(), std::ostream_iterator<int>(ss, " "));
-    return ss.str();
-}
 
 #endif

@@ -7,6 +7,7 @@
 #ifndef SCA_AROUND_LOOP_FUNC_H
 #define SCA_AROUND_LOOP_FUNC_H
 
+#include <torch/torch.h>
 #include "../../src/CoreLoopFunctions.h"
 #include <argos3/core/simulator/space/space.h>
 #include <argos3/plugins/simulator/entities/box_entity.h>

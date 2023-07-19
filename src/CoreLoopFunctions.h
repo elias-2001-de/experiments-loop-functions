@@ -91,6 +91,21 @@ class CoreLoopFunctions: public CLoopFunctions {
      */ 
     virtual void SetValuePointer(shared_data* value);
 
+    // Define your data structure
+    struct Data {
+      float delta;
+      std::vector<float> trace;
+    };
+
+    // Define your serialization function
+    std::string serialize(const Data& data) {
+        std::stringstream ss;
+        ss << data.delta;
+        ss << "\n";
+        std::copy(data.trace.begin(), data.trace.end(), std::ostream_iterator<float>(ss, " "));
+        return ss.str();
+    }
+
 
 };
 

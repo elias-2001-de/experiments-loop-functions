@@ -103,7 +103,7 @@ void AggregationTwoSpotsXOR2::PostStep() {
     m_fObjectiveFunction += Max(m_unScoreSpot1, m_unScoreSpot2);
 
     // send message to policy manager
-    Data data {{1, 2, 3}, {4, 5, 6}};
+    Data data {1, {4, 5, 6}};
     std::string serialized_data = serialize(data);
 
     zmq::message_t message(serialized_data.size());

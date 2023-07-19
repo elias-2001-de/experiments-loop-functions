@@ -10,4 +10,11 @@ add_library(swarmac_loopfunc SHARED
                           ${LOOP_HEADERS}
                           ${LOOP_SOURCES})
 
-target_link_libraries(swarmac_loopfunc argos3plugin_${ARGOS_BUILD_FOR}_epuck cppzmq)
+set(TORCH_LIBRARIES "/home/ken/depots/SwarmAC/libtorch/lib/libtorch.so"
+		"/home/ken/depots/SwarmAC/libtorch/lib/libtorch_cpu.so" 
+		"/home/ken/depots/SwarmAC/libtorch/lib/libc10.so")
+
+target_link_libraries(swarmac_loopfunc 
+			${TORCH_LIBRARIES} 
+			argos3plugin_${ARGOS_BUILD_FOR}_epuck 
+			cppzmq)
