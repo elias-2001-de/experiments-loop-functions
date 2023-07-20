@@ -43,10 +43,6 @@ void Homing::Init(TConfigurationNode& t_tree) {
     m_socket_critic.connect("tcp://localhost:5556");
 
     // Critic network
-    MiniDNN::Layer *layer = new MiniDNN::FullyConnected<MiniDNN::Sigmoid>(2500, 1);
-    m_criticNet.add_layer(layer);
-    m_criticNet.set_output(new MiniDNN::RegressionMSE());
-    m_criticNet.init(0, 0, 0);
 
     // Initialise traces and delta
     delta = 0;
@@ -174,7 +170,7 @@ void Homing::PreStep() {
 
   // Load up-to-date policy network to each robot
   //std::vector<MiniDNN::Scalar> actor;
-  std::vector<double> actor;
+  std::vector<float> actor;
   m_policy->mutex.lock();
   for(auto w : m_policy->vec){
     actor.push_back(w);

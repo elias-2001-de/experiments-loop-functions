@@ -1,3 +1,6 @@
+# Get the paths of libtorch
+find_package(Torch REQUIRED)
+# find cppzmq
 find_package(cppzmq)
 
 add_library(swarmac_loopfunc SHARED
@@ -9,10 +12,6 @@ add_library(swarmac_loopfunc SHARED
                           AggregationTwoSpotsXOR2.cpp
                           ${LOOP_HEADERS}
                           ${LOOP_SOURCES})
-
-set(TORCH_LIBRARIES "/home/ken/depots/SwarmAC/libtorch/lib/libtorch.so"
-		"/home/ken/depots/SwarmAC/libtorch/lib/libtorch_cpu.so" 
-		"/home/ken/depots/SwarmAC/libtorch/lib/libc10.so")
 
 target_link_libraries(swarmac_loopfunc 
 			${TORCH_LIBRARIES} 

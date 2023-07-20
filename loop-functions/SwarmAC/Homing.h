@@ -16,7 +16,6 @@
 #include <argos3/plugins/robots/e-puck/simulator/epuck_entity.h>
 
 #include <zmq.hpp>
-#include <MiniDNN.h>
 
 #include <cmath>
 
@@ -65,7 +64,6 @@ class Homing: public CoreLoopFunctions {
 
     // Network
     CRange<Real> m_cNeuralNetworkOutputRange;
-    MiniDNN::Network m_criticNet;
     struct Net : torch::nn::Module {
       Net() :
           fc(register_module("fc", torch::nn::Linear(2500, 1))){}
