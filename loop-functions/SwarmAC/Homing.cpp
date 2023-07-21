@@ -46,12 +46,8 @@ void Homing::Init(TConfigurationNode& t_tree) {
 
     // Initialise traces and delta
     delta = 0;
-    for (int i = 0; i < 50; ++i) {
-      policy_trace.push_back(10);
-    }
-    for (int i = 0; i < 2501; ++i) {
-      value_trace.push_back(10);
-    }
+    policy_trace = torch::zeros({});
+    value_trace = torch::zeros({});
 
 }
 
@@ -88,12 +84,8 @@ void Homing::Reset() {
   m_unScoreSpot1 = 0;
 
   delta = 0;
-  for (int i = 0; i < 50; ++i) {
-    policy_trace.at(i) = 10;
-  }
-  for (int i = 0; i < 2501; ++i) {
-    value_trace.at(i) = 10;
-  }
+  policy_trace = torch::zeros({});
+  value_trace = torch::zeros({});
 
   CoreLoopFunctions::Reset();
 }
@@ -256,10 +248,11 @@ void Homing::PostStep() {
 
   // Compute value trace
   // TODO: add gradiant
-  for(auto& element : value_trace) {
-    element *= 0.01;     //lambda
-    //std::cout << element << ", ";
-  }
+  value_trace = v_S.backward();
+  // for(auto& element : value_trace) {
+  //   element *= 0.01;     //lambda
+  //   //std::cout << element << ", ";
+  // }
   //std::cout <<" value_tarce\n";
 
   // send message to manager
