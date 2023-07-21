@@ -187,8 +187,8 @@ void Homing::PreStep() {
     CControllableEntity *pcEntity =
         any_cast<CControllableEntity *>(it->second);
     try {
-      CEpuckPyTchController& cController =
-      dynamic_cast<CEpuckPyTchController&>(pcEntity->GetController());
+      CEpuckNNController& cController =
+      dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
       cController.LoadNetwork(actor);
     } catch (std::exception &ex) {
       LOGERR << "Error while setting network: " << ex.what() << std::endl;
