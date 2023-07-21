@@ -158,7 +158,7 @@ void Homing::PreStep() {
         torch::Tensor new_weight_tensor = torch::from_blob(critic_weights.data(), {1, 2500});
         p.value().data().copy_(new_weight_tensor);
       } else if (p.key() == "fc.bias") {
-        std::cout << p.key() << "_critic: " << p.value() << std::endl;
+        //std::cout << p.key() << "_critic: " << p.value() << std::endl;
         torch::Tensor new_bias_tensor = torch::from_blob(critic_bias.data(), {1});
         p.value().data().copy_(new_bias_tensor);
       }
@@ -238,13 +238,13 @@ void Homing::PostStep() {
   // Compute delta with Critic predictions
   //Matrix v_state = m_criticNet.predict(state);
   torch::Tensor v_state = critic_net.forward(state);
-  std::cout << "v(s) = " << v_state[0].item<float>() << std::endl;
+  //std::cout << "v(s) = " << v_state[0].item<float>() << std::endl;
   //Matrix v_state_prime = m_criticNet.predict(state_prime);
   torch::Tensor v_state_prime = critic_net.forward(state_prime);
-  std::cout << "v(s') = " << v_state_prime[0].item<float>() << std::endl;
+  //std::cout << "v(s') = " << v_state_prime[0].item<float>() << std::endl;
   //delta = m_fObjectiveFunction + v_state(0) - v_state_prime(0);
   delta = m_fObjectiveFunction + v_state[0].item<float>() - v_state_prime[0].item<float>();
-  std::cout << "delta = " << delta << std::endl;
+  //std::cout << "delta = " << delta << std::endl;
 
   // Compute policy trace
   // TODO: add gradiant
@@ -282,7 +282,7 @@ void Homing::PostStep() {
 /****************************************/
 
 void Homing::PostExperiment() {
-  //LOG << "Score = " << m_fObjectiveFunction << std::endl;
+  LOG << "Score = " << m_fObjectiveFunction << std::endl;
 }
 
 /****************************************/
