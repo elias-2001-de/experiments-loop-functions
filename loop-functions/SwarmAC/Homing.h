@@ -79,8 +79,8 @@ class Homing: public CoreLoopFunctions {
     
     // Learning variables
     float delta;
-    torch::Tensor value_trace;
-    torch::Tensor policy_trace;
+    std::vector<float> value_trace;
+    std::vector<float> policy_trace;
 
     // State vectors
     // Vector state;         // S at step t (50x50 grid representation)

@@ -46,9 +46,10 @@ void Homing::Init(TConfigurationNode& t_tree) {
 
     // Initialise traces and delta
     delta = 0;
-    policy_trace = torch::zeros({});
-    value_trace = torch::zeros({});
-
+    policy_trace.resize(50);
+    std::fill(policy_trace.begin(), policy_trace.end(), 0.0f);
+    value_trace.resize(2501);
+    std::fill(value_trace.begin(), value_trace.end(), 0.0f);
 }
 
 /****************************************/
@@ -84,8 +85,10 @@ void Homing::Reset() {
   m_unScoreSpot1 = 0;
 
   delta = 0;
-  policy_trace = torch::zeros({});
-  value_trace = torch::zeros({});
+  policy_trace.resize(50);
+  std::fill(policy_trace.begin(), policy_trace.end(), 0.0f);
+  value_trace.resize(2501);
+  std::fill(value_trace.begin(), value_trace.end(), 0.0f);
 
   CoreLoopFunctions::Reset();
 }
@@ -248,7 +251,30 @@ void Homing::PostStep() {
 
   // Compute value trace
   // TODO: add gradiant
-  value_trace = v_S.backward();
+  // Initialize critic_trace as a std::vector<torch::Tensor>
+  // Zero out the gradients
+  critic_net.zero_grad();
+  // Compute the gradient by back-propagation
+  v_state.backward();
+  std::cout << "value trace: " << value_trace << std::endl;
+  // if critic_trace is not empty, update it
+  int i = 0;
+  for (auto& p : critic_net.parameters()) {
+	  torch::Tensor value_trace_tensor = torch::tensor(value_trace[i]);
+	  value_trace_tensor = value_trace_tensor * 0.1 + p.grad();
+	  // Convert the tensor back to a float and update the ith element of value_trace
+	  //value_trace[i] = value_trace_tensor.item<float>();
+	  auto value_trace_tensor_accessor = value_trace_tensor.accessor<float,1>();
+
+	  for(int i = 0; i < value_trace_tensor_accessor.size(0); i++)
+	  {
+		  std::cout << "here\n";    
+		  value_trace[i] = value_trace_tensor_accessor[i];
+		  std::cout << "there\n";
+	  }
+
+	  ++i;
+  }
   // for(auto& element : value_trace) {
   //   element *= 0.01;     //lambda
   //   //std::cout << element << ", ";
