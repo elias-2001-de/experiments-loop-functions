@@ -102,7 +102,6 @@ void Homing::PreStep() {
    * If robot is in cell i --> 1
    * else 0
    */
-  //Eigen::MatrixXd grid = Eigen::MatrixXd::Zero(50,50);
   at::Tensor grid = torch::zeros({50, 50});
   CSpace::TMapPerType& tEpuckMap = GetSpace().GetEntitiesByType("epuck");
   CVector2 cEpuckPosition(0,0);
@@ -116,18 +115,14 @@ void Homing::PreStep() {
     int grid_y = static_cast<int>(std::round((cEpuckPosition.GetY() + 1.231) / 2.462 * 49));
 
     // Set the grid cell that corresponds to the epuck's position to 1
-    //grid(grid_y, grid_x) = 1;
     grid[grid_y][grid_x] = 1;
   }
   //std::cout << "state:\n" << grid << std::endl;
-  // convert matrix to vector for net input
-  //state = Eigen::Map<Eigen::VectorXd>(grid.data(), grid.size());
   // Flatten the 2D tensor to 1D for net input
   state = grid.view({-1}).clone();
   state.set_requires_grad(true);
 
   // Load up-to-date value network
-  //std::vector<MiniDNN::Scalar> critic;
   std::vector<float> critic;
   std::vector<float> critic_weights;
   std::vector<float> critic_bias;
@@ -159,10 +154,6 @@ void Homing::PreStep() {
         p.value().data().copy_(new_bias_tensor);
       }
   }
-
-  //auto layer = const_cast<MiniDNN::Layer *>(m_criticNet.get_layers()[0]);
-  //layer->set_parameters(critic);
-  //std::cout <<" critic\n";
 
   // Load up-to-date policy network to each robot
   //std::vector<MiniDNN::Scalar> actor;
@@ -196,10 +187,10 @@ void Homing::PreStep() {
 /****************************************/
 
 void Homing::PostStep() {
-  //Eigen::MatrixXd grid = Eigen::MatrixXd::Zero(50,50);
   at::Tensor grid = torch::zeros({50, 50});
   CSpace::TMapPerType& tEpuckMap = GetSpace().GetEntitiesByType("epuck");
   CVector2 cEpuckPosition(0,0);
+  m_unScoreSpot1 = 0;	
   for (CSpace::TMapPerType::iterator it = tEpuckMap.begin(); it != tEpuckMap.end(); ++it) {
     CEPuckEntity* pcEpuck = any_cast<CEPuckEntity*>(it->second);
     cEpuckPosition.Set(pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetX(),
@@ -207,8 +198,8 @@ void Homing::PostStep() {
 
     Real fDistanceSpot1 = (m_cCoordSpot1 - cEpuckPosition).Length();
     if (fDistanceSpot1 <= m_fRadius) {
-      //m_unScoreSpot1 += 1;
-      m_fObjectiveFunction += 1;    // Reward    
+      m_unScoreSpot1 += 1;    // Reward
+      m_fObjectiveFunction += 1;       
     }
 
     // Scale the position to the grid size
@@ -227,32 +218,21 @@ void Homing::PostStep() {
    * If robot is in grid --> 1
    * else 0
    */
-  //state_prime = Eigen::Map<Eigen::VectorXd>(grid.data(), grid.size());
   // Flatten the 2D tensor to 1D for net input
   state_prime = grid.view({-1}).clone();
 
   // Compute delta with Critic predictions
   //Matrix v_state = m_criticNet.predict(state);
   torch::Tensor v_state = critic_net.forward(state);
-  //std::cout << "v(s) = " << v_state[0].item<float>() << std::endl;
+  std::cout << "v(s) = " << v_state[0].item<float>() << std::endl;
   //Matrix v_state_prime = m_criticNet.predict(state_prime);
   torch::Tensor v_state_prime = critic_net.forward(state_prime);
-  //std::cout << "v(s') = " << v_state_prime[0].item<float>() << std::endl;
+  std::cout << "v(s') = " << v_state_prime[0].item<float>() << std::endl;
   //delta = m_fObjectiveFunction + v_state(0) - v_state_prime(0);
-  delta = m_fObjectiveFunction + v_state[0].item<float>() - v_state_prime[0].item<float>();
-  //std::cout << "delta = " << delta << std::endl;
-
-  // Compute policy trace
-  // TODO: add gradiant
-  for(auto& element : policy_trace) {
-    element *= 0.01;     //lambda
-    //std::cout << element << ", ";
-  }
-  //std::cout <<" policy_tarce\n";
+  delta = m_unScoreSpot1 + v_state[0].item<float>() - v_state_prime[0].item<float>();
+  std::cout << "delta = " << delta << std::endl;
 
   // Compute value trace
-  // TODO: add gradiant
-  // Initialize critic_trace as a std::vector<torch::Tensor>
   // Zero out the gradients
   critic_net.zero_grad();
   // Compute the gradient by back-propagation
@@ -265,22 +245,23 @@ void Homing::PostStep() {
   weight_grad = weight_grad.view({-1});
   bias_grad = bias_grad.view({-1});
   float *weight_data = weight_grad.data_ptr<float>();
-  int lambda_critic = 0.5;
+  float lambda_critic = 0.8;
   for (int i = 0; i < 2500; ++i) {
-	      value_trace[i] = lambda_critic * value_trace[i] + weight_data[i];
+	  value_trace[i] = lambda_critic * value_trace[i] + weight_data[i];
   }
   float *bias_data = bias_grad.data_ptr<float>();
-  value_trace[2500] += bias_data[0];
-  std::cout << "value trace: " << value_trace << std::endl;
-  std::cout << "accumulate of trace: " << accumulate(value_trace.begin(),value_trace.end(),0) << std::endl;
-  //
-  // if critic_trace is not empty, update it
-  // for(auto& element : value_trace) {
-  //   element *= 0.01;     //lambda
-  //   //std::cout << element << ", ";
-  // }
-  //std::cout <<" value_tarce\n";
+  value_trace[2500] = lambda_critic * value_trace[2500] + bias_data[0];
+  //std::cout << "value trace: " << value_trace << std::endl;
+  std::cout << "accumulate of trace: " << accumulate(value_trace.begin(),value_trace.end(),0.0) << std::endl;
 
+  // Compute policy trace
+  // TODO: add gradiant
+  for(auto& element : policy_trace) {
+    element *= 0.01;     //lambda
+    //std::cout << element << ", ";
+  }
+  //std::cout <<" policy_tarce\n";
+  
   // send message to manager
   // actor
   Data policy_data {delta, policy_trace};   
