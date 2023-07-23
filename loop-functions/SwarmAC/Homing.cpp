@@ -124,6 +124,7 @@ void Homing::PreStep() {
   //state = Eigen::Map<Eigen::VectorXd>(grid.data(), grid.size());
   // Flatten the 2D tensor to 1D for net input
   state = grid.view({-1}).clone();
+  state.set_requires_grad(true);
 
   // Load up-to-date value network
   //std::vector<MiniDNN::Scalar> critic;
@@ -256,25 +257,24 @@ void Homing::PostStep() {
   critic_net.zero_grad();
   // Compute the gradient by back-propagation
   v_state.backward();
-  std::cout << "value trace: " << value_trace << std::endl;
-  // if critic_trace is not empty, update it
-  int i = 0;
-  for (auto& p : critic_net.parameters()) {
-	  torch::Tensor value_trace_tensor = torch::tensor(value_trace[i]);
-	  value_trace_tensor = value_trace_tensor * 0.1 + p.grad();
-	  // Convert the tensor back to a float and update the ith element of value_trace
-	  //value_trace[i] = value_trace_tensor.item<float>();
-	  auto value_trace_tensor_accessor = value_trace_tensor.accessor<float,1>();
-
-	  for(int i = 0; i < value_trace_tensor_accessor.size(0); i++)
-	  {
-		  std::cout << "here\n";    
-		  value_trace[i] = value_trace_tensor_accessor[i];
-		  std::cout << "there\n";
-	  }
-
-	  ++i;
+  auto params = critic_net.named_parameters();
+  auto weight_grad = params["fc.weight"].grad();
+  auto bias_grad = params["fc.bias"].grad();
+  //std::cout << "Weight gradients: " << weight_grad << std::endl;
+  //std::cout << "Bias gradients: " << bias_grad << std::endl;
+  weight_grad = weight_grad.view({-1});
+  bias_grad = bias_grad.view({-1});
+  float *weight_data = weight_grad.data_ptr<float>();
+  int lambda_critic = 0.5;
+  for (int i = 0; i < 2500; ++i) {
+	      value_trace[i] = lambda_critic * value_trace[i] + weight_data[i];
   }
+  float *bias_data = bias_grad.data_ptr<float>();
+  value_trace[2500] += bias_data[0];
+  std::cout << "value trace: " << value_trace << std::endl;
+  std::cout << "accumulate of trace: " << accumulate(value_trace.begin(),value_trace.end(),0) << std::endl;
+  //
+  // if critic_trace is not empty, update it
   // for(auto& element : value_trace) {
   //   element *= 0.01;     //lambda
   //   //std::cout << element << ", ";
