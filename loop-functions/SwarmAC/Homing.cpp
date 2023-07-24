@@ -112,12 +112,11 @@ void Homing::PreStep() {
     
     // Scale the position to the grid size
     int grid_x = static_cast<int>(std::round((cEpuckPosition.GetX() + 1.231) / 2.462 * 49));
-    int grid_y = static_cast<int>(std::round((cEpuckPosition.GetY() + 1.231) / 2.462 * 49));
+    int grid_y = static_cast<int>(std::round((-cEpuckPosition.GetY() + 1.231) / 2.462 * 49));
 
     // Set the grid cell that corresponds to the epuck's position to 1
-    grid[grid_y][grid_x] = 1;
+    grid[grid_x][grid_y] = 1;
   }
-  //std::cout << "state:\n" << grid << std::endl;
   // Flatten the 2D tensor to 1D for net input
   state = grid.view({-1}).clone();
   state.set_requires_grad(true);
@@ -144,7 +143,7 @@ void Homing::PreStep() {
   // Upadate critic weights and bias
   for (auto& p : critic_net.named_parameters()) {
       if (p.key() == "fc.weight") {
-        //std::cout << p.key() << ": " << p.value() << std::endl;
+        //std::cout << "critic weight accumulate: " << accumulate(critic_weights.begin(),critic_weights.end(),0.0) << std::endl;
         //std::cout << "Critic: " << critic << std::endl;
         torch::Tensor new_weight_tensor = torch::from_blob(critic_weights.data(), {1, 2500});
         p.value().data().copy_(new_weight_tensor);
@@ -196,20 +195,48 @@ void Homing::PostStep() {
     cEpuckPosition.Set(pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetX(),
                        pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetY());
 
+    
+    // Scale the position to the grid size
+    int grid_x = static_cast<int>(std::round((cEpuckPosition.GetX() + 1.231) / 2.462 * 49));
+    int grid_y = static_cast<int>(std::round((-cEpuckPosition.GetY() + 1.231) / 2.462 * 49));
+    
     Real fDistanceSpot1 = (m_cCoordSpot1 - cEpuckPosition).Length();
     if (fDistanceSpot1 <= m_fRadius) {
       m_unScoreSpot1 += 1;    // Reward
-      m_fObjectiveFunction += 1;       
+      m_fObjectiveFunction += 1;
+      //std::cout << "Robot at [" << grid_x << ";" << grid_y << "]\n";      
     }
-
-    // Scale the position to the grid size
-    int grid_x = static_cast<int>(std::round((cEpuckPosition.GetX() + 1.231) / 2.462 * 49));
-    int grid_y = static_cast<int>(std::round((cEpuckPosition.GetY() + 1.231) / 2.462 * 49));
-
+    
     // Set the grid cell that corresponds to the epuck's position to 1
     //grid(grid_y, grid_x) = 1;
-    grid[grid_y][grid_x] = 1;
+    grid[grid_x][grid_y] = 1;
   }
+  
+  //if(m_unScoreSpot1 > 0){
+    std::cout << "score: " << m_unScoreSpot1 << std::endl;	  
+    // place spot in grid
+    int grid_x = static_cast<int>(std::round((m_cCoordSpot1.GetX() + 1.231) / 2.462 * 49));
+    int grid_y = static_cast<int>(std::round((-m_cCoordSpot1.GetY() + 1.231) / 2.462 * 49));
+    int radius = static_cast<int>(std::round(0.35 / 2.462 * 49));
+    // Print arena on the terminal
+    auto temp1 = grid[grid_x][grid_y];
+    auto temp2 = grid[grid_x+radius][grid_y];
+    auto temp3 = grid[grid_x-radius][grid_y];
+    auto temp4 = grid[grid_x][grid_y+radius];
+    auto temp5 = grid[grid_x][grid_y-radius];
+    grid[grid_x][grid_y] = 2;
+    grid[grid_x+radius][grid_y] = 3;
+    grid[grid_x-radius][grid_y] = 3;
+    grid[grid_x][grid_y+radius] = 3;
+    grid[grid_x][grid_y-radius] = 3;
+    std::cout << "State:\n";
+    print_grid(grid);
+    grid[grid_x][grid_y] = temp1;
+    grid[grid_x+radius][grid_y] = temp2;
+    grid[grid_x-radius][grid_y] = temp3;
+    grid[grid_x][grid_y+radius] = temp4;
+    grid[grid_x][grid_y-radius] = temp5;
+  //}
   //m_fObjectiveFunction = m_unScoreSpot1/(Real) m_unNumberRobots;
   //LOG << "Score = " << m_fObjectiveFunction << std::endl;
 
@@ -224,13 +251,13 @@ void Homing::PostStep() {
   // Compute delta with Critic predictions
   //Matrix v_state = m_criticNet.predict(state);
   torch::Tensor v_state = critic_net.forward(state);
-  std::cout << "v(s) = " << v_state[0].item<float>() << std::endl;
+  //std::cout << "v(s) = " << v_state[0].item<float>() << std::endl;
   //Matrix v_state_prime = m_criticNet.predict(state_prime);
   torch::Tensor v_state_prime = critic_net.forward(state_prime);
-  std::cout << "v(s') = " << v_state_prime[0].item<float>() << std::endl;
+  //std::cout << "v(s') = " << v_state_prime[0].item<float>() << std::endl;
   //delta = m_fObjectiveFunction + v_state(0) - v_state_prime(0);
   delta = m_unScoreSpot1 + v_state[0].item<float>() - v_state_prime[0].item<float>();
-  std::cout << "delta = " << delta << std::endl;
+  //std::cout << "delta = " << delta << std::endl;
 
   // Compute value trace
   // Zero out the gradients
@@ -252,7 +279,7 @@ void Homing::PostStep() {
   float *bias_data = bias_grad.data_ptr<float>();
   value_trace[2500] = lambda_critic * value_trace[2500] + bias_data[0];
   //std::cout << "value trace: " << value_trace << std::endl;
-  std::cout << "accumulate of trace: " << accumulate(value_trace.begin(),value_trace.end(),0.0) << std::endl;
+  //std::cout << "accumulate of trace: " << accumulate(value_trace.begin(),value_trace.end(),0.0) << std::endl;
 
   // Compute policy trace
   // TODO: add gradiant
@@ -365,7 +392,73 @@ void Homing::update_actor(torch::nn::Module& actor_net, torch::Tensor& behavior_
     optimizer.step();
 }
 
+
 /****************************************/
 /****************************************/
 
+void Homing::print_grid(at::Tensor grid){
+    // Get the size of the grid tensor
+    auto sizes = grid.sizes();
+    int rows = sizes[0];
+    int cols = sizes[1];
+    int dimension = std::max(rows, cols);
+
+    // Calculate the scaling factors for rows and columns to achieve a square aspect ratio
+    float scale_row = static_cast<float>(dimension) / rows;
+    float scale_col = static_cast<float>(dimension) / cols;
+
+    // Print the grid with layout
+    for (int y = 0; y < dimension; ++y) {
+        if (y % int(scale_row) == 0) {
+            // Print the top and bottom grid borders
+            for (int x = 0; x < dimension; ++x) {
+                std::cout << "+---";
+            }
+            std::cout << "+" << std::endl;
+        }
+
+        for (int x = 0; x < dimension; ++x) {
+            if (x % int(scale_col) == 0) {
+                std::cout << "|"; // Print the left grid border
+            }
+
+            // Calculate the corresponding position in the original grid
+            int orig_x = static_cast<int>(x / scale_col);
+            int orig_y = static_cast<int>(y / scale_row);
+
+            // Check if the current position is within the original grid bounds
+            if (orig_x < cols && orig_y < rows) {
+                float value = grid[orig_y][orig_x].item<float>();
+
+                // Print highlighted character if the value is 1, otherwise print a space
+                if (value == 1) {
+                    std::cout << " R ";
+		} else if (value == 2){
+		    std::cout << " C ";
+		} else if (value == 3){
+                    std::cout << " B ";
+                } else {
+                    std::cout << "   ";
+                }
+            } else {
+                std::cout << " "; // Print a space for out-of-bounds positions
+            }
+        }
+
+        if (y % int(scale_row) == 0) {
+            std::cout << "|" << std::endl; // Print the right grid border
+        } else {
+            std::cout << "|" << std::endl; // Print a separator for other rows
+        }
+    }
+
+    // Print the bottom grid border
+    for (int x = 0; x < dimension; ++x) {
+        std::cout << "+---";
+    }
+    std::cout << "+" << std::endl;
+}
+
+/****************************************/
+/****************************************/
 REGISTER_LOOP_FUNCTIONS(Homing, "homing");

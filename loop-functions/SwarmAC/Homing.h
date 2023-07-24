@@ -51,6 +51,8 @@ class Homing: public CoreLoopFunctions {
                       double chosen_parameter, double td_error, 
                       torch::optim::Optimizer& optimizer);
 
+    void print_grid(at::Tensor grid);
+
   private:
     Real m_fRadius;
     CVector2 m_cCoordSpot1;
