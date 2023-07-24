@@ -46,7 +46,7 @@ void Homing::Init(TConfigurationNode& t_tree) {
 
     // Initialise traces and delta
     delta = 0;
-    policy_trace.resize(50);
+    policy_trace.resize(100);   // For Dandelion
     std::fill(policy_trace.begin(), policy_trace.end(), 0.0f);
     value_trace.resize(2501);
     std::fill(value_trace.begin(), value_trace.end(), 0.0f);
@@ -85,7 +85,7 @@ void Homing::Reset() {
   m_unScoreSpot1 = 0;
 
   delta = 0;
-  policy_trace.resize(50);
+  policy_trace.resize(100);
   std::fill(policy_trace.begin(), policy_trace.end(), 0.0f);
   value_trace.resize(2501);
   std::fill(value_trace.begin(), value_trace.end(), 0.0f);
@@ -155,9 +155,10 @@ void Homing::PreStep() {
   }
 
   // Load up-to-date policy network to each robot
-  //std::vector<MiniDNN::Scalar> actor;
   std::vector<float> actor;
   m_policy->mutex.lock();
+  // 96 weights (24 * 4) + 4 bias for Dandelion
+  // 144 weights (24 * 6) + 6 bias for Daisy
   for(auto w : m_policy->vec){
     actor.push_back(w);
     //std::cout << w << ", ";
@@ -251,10 +252,10 @@ void Homing::PostStep() {
   // Compute delta with Critic predictions
   //Matrix v_state = m_criticNet.predict(state);
   torch::Tensor v_state = critic_net.forward(state);
-  //std::cout << "v(s) = " << v_state[0].item<float>() << std::endl;
+  std::cout << "v(s) = " << v_state[0].item<float>() << std::endl;
   //Matrix v_state_prime = m_criticNet.predict(state_prime);
   torch::Tensor v_state_prime = critic_net.forward(state_prime);
-  //std::cout << "v(s') = " << v_state_prime[0].item<float>() << std::endl;
+  std::cout << "v(s') = " << v_state_prime[0].item<float>() << std::endl;
   //delta = m_fObjectiveFunction + v_state(0) - v_state_prime(0);
   delta = m_unScoreSpot1 + v_state[0].item<float>() - v_state_prime[0].item<float>();
   //std::cout << "delta = " << delta << std::endl;

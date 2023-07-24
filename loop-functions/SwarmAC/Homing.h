@@ -72,7 +72,8 @@ class Homing: public CoreLoopFunctions {
 
       // Implement the Net's algorithm.
       torch::Tensor forward(torch::Tensor x) {
-        return fc(x);
+        x = torch::relu(fc(x));
+	return x;
       };
 
       torch::nn::Linear fc;
