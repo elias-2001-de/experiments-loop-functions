@@ -22,6 +22,7 @@
 #include "../../src/CoreLoopFunctions.h"
 #include "../../../AC_trainer/src/shared_mem.h"
 #include "../../../argos3-nn/src/NNController.h"
+#include "../../../argos3-nn/src/DandelController.h"
 
 using namespace argos;
 

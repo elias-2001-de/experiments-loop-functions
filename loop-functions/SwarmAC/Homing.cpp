@@ -97,6 +97,7 @@ void Homing::Reset() {
 /****************************************/
 
 void Homing::PreStep() {
+  std::cout << "Prestep\n";
   // Observe state S
   /* Check position for each agent. 
    * If robot is in cell i --> 1
@@ -187,6 +188,7 @@ void Homing::PreStep() {
 /****************************************/
 
 void Homing::PostStep() {
+  std::cout << "PostStep\n";
   at::Tensor grid = torch::zeros({50, 50});
   CSpace::TMapPerType& tEpuckMap = GetSpace().GetEntitiesByType("epuck");
   CVector2 cEpuckPosition(0,0);
@@ -231,7 +233,7 @@ void Homing::PostStep() {
     grid[grid_x][grid_y+radius] = 3;
     grid[grid_x][grid_y-radius] = 3;
     std::cout << "State:\n";
-    print_grid(grid);
+    //print_grid(grid);
     grid[grid_x][grid_y] = temp1;
     grid[grid_x+radius][grid_y] = temp2;
     grid[grid_x-radius][grid_y] = temp3;
@@ -284,13 +286,32 @@ void Homing::PostStep() {
 
   // Compute policy trace
   // TODO: add gradiant
+  /*
   for(auto& element : policy_trace) {
     element *= 0.01;     //lambda
     //std::cout << element << ", ";
   }
+  */
   //std::cout <<" policy_tarce\n";
   
-  // send message to manager
+  CSpace::TMapPerType cEntities = GetSpace().GetEntitiesByType("controller");  
+  for (CSpace::TMapPerType::iterator it = cEntities.begin();
+		  it != cEntities.end(); ++it) {
+	  CControllableEntity *pcEntity =
+		  any_cast<CControllableEntity *>(it->second);	    
+	  try {
+		  CEpuckDandelController& cController =
+			  dynamic_cast<CEpuckDandelController&>(pcEntity->GetController());
+		  std::vector<float> trace = cController.get_policy_trace();
+		  std::cout << "robot policy trace: " << trace << std::endl;
+		  for (int i = 0; i < 100; ++i) {			            
+			  policy_trace[i] += trace[i];			
+    		  }
+	  } catch (std::exception &ex) {
+		  LOGERR << "Error while updating policy trace: " << ex.what() << std::endl;
+	  }
+  }
+  std::cout << "swarm policy trace: " << policy_trace << std::endl;
   // actor
   Data policy_data {delta, policy_trace};   
   std::string serialized_data = serialize(policy_data);
