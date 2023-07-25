@@ -97,7 +97,6 @@ void Homing::Reset() {
 /****************************************/
 
 void Homing::PreStep() {
-  std::cout << "Prestep\n";
   // Observe state S
   /* Check position for each agent. 
    * If robot is in cell i --> 1
@@ -188,7 +187,6 @@ void Homing::PreStep() {
 /****************************************/
 
 void Homing::PostStep() {
-  std::cout << "PostStep\n";
   at::Tensor grid = torch::zeros({50, 50});
   CSpace::TMapPerType& tEpuckMap = GetSpace().GetEntitiesByType("epuck");
   CVector2 cEpuckPosition(0,0);
@@ -233,7 +231,7 @@ void Homing::PostStep() {
     grid[grid_x][grid_y+radius] = 3;
     grid[grid_x][grid_y-radius] = 3;
     std::cout << "State:\n";
-    //print_grid(grid);
+    print_grid(grid);
     grid[grid_x][grid_y] = temp1;
     grid[grid_x+radius][grid_y] = temp2;
     grid[grid_x-radius][grid_y] = temp3;
@@ -260,7 +258,7 @@ void Homing::PostStep() {
   std::cout << "v(s') = " << v_state_prime[0].item<float>() << std::endl;
   //delta = m_fObjectiveFunction + v_state(0) - v_state_prime(0);
   delta = m_unScoreSpot1 + v_state[0].item<float>() - v_state_prime[0].item<float>();
-  //std::cout << "delta = " << delta << std::endl;
+  std::cout << "delta = " << delta << std::endl;
 
   // Compute value trace
   // Zero out the gradients
@@ -303,7 +301,6 @@ void Homing::PostStep() {
 		  CEpuckDandelController& cController =
 			  dynamic_cast<CEpuckDandelController&>(pcEntity->GetController());
 		  std::vector<float> trace = cController.get_policy_trace();
-		  std::cout << "robot policy trace: " << trace << std::endl;
 		  for (int i = 0; i < 100; ++i) {			            
 			  policy_trace[i] += trace[i];			
     		  }
