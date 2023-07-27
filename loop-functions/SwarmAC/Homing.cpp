@@ -46,7 +46,7 @@ void Homing::Init(TConfigurationNode& t_tree) {
 
     // Initialise traces and delta
     delta = 0;
-    policy_trace.resize(100);   // For Dandelion
+    policy_trace.resize(100 - 4);   // For Dandelion, no bias
     std::fill(policy_trace.begin(), policy_trace.end(), 0.0f);
     value_trace.resize(2501);
     std::fill(value_trace.begin(), value_trace.end(), 0.0f);
@@ -85,7 +85,7 @@ void Homing::Reset() {
   m_unScoreSpot1 = 0;
 
   delta = 0;
-  policy_trace.resize(100);
+  policy_trace.resize(100 - 4);
   std::fill(policy_trace.begin(), policy_trace.end(), 0.0f);
   value_trace.resize(2501);
   std::fill(value_trace.begin(), value_trace.end(), 0.0f);
@@ -214,7 +214,7 @@ void Homing::PostStep() {
   }
   
   //if(m_unScoreSpot1 > 0){
-    std::cout << "score: " << m_unScoreSpot1 << std::endl;	  
+    //std::cout << "score: " << m_unScoreSpot1 << std::endl;	  
     // place spot in grid
     int grid_x = static_cast<int>(std::round((m_cCoordSpot1.GetX() + 1.231) / 2.462 * 49));
     int grid_y = static_cast<int>(std::round((-m_cCoordSpot1.GetY() + 1.231) / 2.462 * 49));
@@ -230,7 +230,7 @@ void Homing::PostStep() {
     grid[grid_x-radius][grid_y] = 3;
     grid[grid_x][grid_y+radius] = 3;
     grid[grid_x][grid_y-radius] = 3;
-    std::cout << "State:\n";
+    //std::cout << "State:\n";
     print_grid(grid);
     grid[grid_x][grid_y] = temp1;
     grid[grid_x+radius][grid_y] = temp2;
@@ -252,13 +252,13 @@ void Homing::PostStep() {
   // Compute delta with Critic predictions
   //Matrix v_state = m_criticNet.predict(state);
   torch::Tensor v_state = critic_net.forward(state);
-  std::cout << "v(s) = " << v_state[0].item<float>() << std::endl;
+  //std::cout << "v(s) = " << v_state[0].item<float>() << std::endl;
   //Matrix v_state_prime = m_criticNet.predict(state_prime);
   torch::Tensor v_state_prime = critic_net.forward(state_prime);
-  std::cout << "v(s') = " << v_state_prime[0].item<float>() << std::endl;
+  //std::cout << "v(s') = " << v_state_prime[0].item<float>() << std::endl;
   //delta = m_fObjectiveFunction + v_state(0) - v_state_prime(0);
-  delta = m_unScoreSpot1 + v_state[0].item<float>() - v_state_prime[0].item<float>();
-  std::cout << "delta = " << delta << std::endl;
+  delta = m_unScoreSpot1 + v_state_prime[0].item<float>() - v_state[0].item<float>();
+  //std::cout << "delta = " << delta << std::endl;
 
   // Compute value trace
   // Zero out the gradients
@@ -279,7 +279,7 @@ void Homing::PostStep() {
   }
   float *bias_data = bias_grad.data_ptr<float>();
   value_trace[2500] = lambda_critic * value_trace[2500] + bias_data[0];
-  //std::cout << "value trace: " << value_trace << std::endl;
+  //std::cout << "value trace bias: " << value_trace[-1] << std::endl;
   //std::cout << "accumulate of trace: " << accumulate(value_trace.begin(),value_trace.end(),0.0) << std::endl;
 
   // Compute policy trace
@@ -301,14 +301,14 @@ void Homing::PostStep() {
 		  CEpuckDandelController& cController =
 			  dynamic_cast<CEpuckDandelController&>(pcEntity->GetController());
 		  std::vector<float> trace = cController.get_policy_trace();
-		  for (int i = 0; i < 100; ++i) {			            
+		  for (int i = 0; i < 100 - 4; ++i) {			            
 			  policy_trace[i] += trace[i];			
     		  }
 	  } catch (std::exception &ex) {
 		  LOGERR << "Error while updating policy trace: " << ex.what() << std::endl;
 	  }
   }
-  std::cout << "swarm policy trace: " << policy_trace << std::endl;
+  //std::cout << "swarm policy trace: " << policy_trace << std::endl;
   // actor
   Data policy_data {delta, policy_trace};   
   std::string serialized_data = serialize(policy_data);
