@@ -91,7 +91,7 @@ class Homing: public CoreLoopFunctions {
     at::Tensor state;
     at::Tensor state_prime;
 
-    int size_policy_net = 144;
+    int size_policy_net = 288;
 };
 
 #endif

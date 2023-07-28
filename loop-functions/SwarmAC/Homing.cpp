@@ -97,6 +97,7 @@ void Homing::Reset() {
 /****************************************/
 
 void Homing::PreStep() {
+  std::cout << "PreStep\n";
   // Observe state S
   /* Check position for each agent. 
    * If robot is in cell i --> 1
@@ -130,9 +131,9 @@ void Homing::PreStep() {
   m_value->mutex.lock();
   for(auto w : m_value->vec){
       critic.push_back(w);
-      if(critic_weights.size() < 2500){
+      if(critic_weights.size() < 2501){
         critic_weights.push_back(w);
-      }else if (critic_weights.size() == 2500)
+      }else if (critic_weights.size() == 2501)
       {
         critic_bias.push_back(w);
       }
@@ -145,7 +146,7 @@ void Homing::PreStep() {
       if (p.key() == "fc.weight") {
         //std::cout << "critic weight accumulate: " << accumulate(critic_weights.begin(),critic_weights.end(),0.0) << std::endl;
         //std::cout << "Critic: " << critic << std::endl;
-        torch::Tensor new_weight_tensor = torch::from_blob(critic_weights.data(), {1, 2500});
+        torch::Tensor new_weight_tensor = torch::from_blob(critic_weights.data(), {1, 2501});
         p.value().data().copy_(new_weight_tensor);
       } else if (p.key() == "fc.bias") {
         //std::cout << p.key() << "_critic: " << p.value() << std::endl;
@@ -158,14 +159,15 @@ void Homing::PreStep() {
   std::vector<float> actor;
   m_policy->mutex.lock();
   // 96 weights (24 * 4) + 4 bias for Dandelion
-  // 144 weights (24 * 6) + 6 bias for Daisy
+  // 288 weights (24 * 12) + 6 bias for Daisy
   for(auto w : m_policy->vec){
     actor.push_back(w);
     //std::cout << w << ", ";
   }
   m_policy->mutex.unlock();
-  //std::cout <<" actor\n";
-  
+  std::cout <<" actor\n";
+  std::cout << "global policy size: " << actor.size() << std::endl;
+   
   // Launch the experiment with the correct random seed and network,
   // and evaluate the average fitness
   CSpace::TMapPerType cEntities = GetSpace().GetEntitiesByType("controller");
@@ -176,6 +178,7 @@ void Homing::PreStep() {
     try {
       CEpuckNNController& cController =
       dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
+      std::cout << "LOADNET\n";
       cController.LoadNetwork(actor);
     } catch (std::exception &ex) {
       LOGERR << "Error while setting network: " << ex.what() << std::endl;
@@ -274,11 +277,11 @@ void Homing::PostStep() {
   bias_grad = bias_grad.view({-1});
   float *weight_data = weight_grad.data_ptr<float>();
   float lambda_critic = 0.8;
-  for (int i = 0; i < 2500; ++i) {
+  for (int i = 0; i < 2501; ++i) {
 	  value_trace[i] = lambda_critic * value_trace[i] + weight_data[i];
   }
   float *bias_data = bias_grad.data_ptr<float>();
-  value_trace[2500] = lambda_critic * value_trace[2500] + bias_data[0];
+  value_trace[2501] = lambda_critic * value_trace[2500] + bias_data[0];
   //std::cout << "value trace bias: " << value_trace[-1] << std::endl;
   //std::cout << "accumulate of trace: " << accumulate(value_trace.begin(),value_trace.end(),0.0) << std::endl;
 
