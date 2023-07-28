@@ -46,7 +46,7 @@ void Homing::Init(TConfigurationNode& t_tree) {
 
     // Initialise traces and delta
     delta = 0;
-    policy_trace.resize(100 - 4);   // For Dandelion, no bias
+    policy_trace.resize(size_policy_net);
     std::fill(policy_trace.begin(), policy_trace.end(), 0.0f);
     value_trace.resize(2501);
     std::fill(value_trace.begin(), value_trace.end(), 0.0f);
@@ -85,7 +85,7 @@ void Homing::Reset() {
   m_unScoreSpot1 = 0;
 
   delta = 0;
-  policy_trace.resize(100 - 4);
+  policy_trace.resize(size_policy_net);
   std::fill(policy_trace.begin(), policy_trace.end(), 0.0f);
   value_trace.resize(2501);
   std::fill(value_trace.begin(), value_trace.end(), 0.0f);
@@ -230,7 +230,7 @@ void Homing::PostStep() {
     grid[grid_x-radius][grid_y] = 3;
     grid[grid_x][grid_y+radius] = 3;
     grid[grid_x][grid_y-radius] = 3;
-    //std::cout << "State:\n";
+    std::cout << "State:\n";
     print_grid(grid);
     grid[grid_x][grid_y] = temp1;
     grid[grid_x+radius][grid_y] = temp2;
@@ -298,10 +298,10 @@ void Homing::PostStep() {
 	  CControllableEntity *pcEntity =
 		  any_cast<CControllableEntity *>(it->second);	    
 	  try {
-		  CEpuckDandelController& cController =
-			  dynamic_cast<CEpuckDandelController&>(pcEntity->GetController());
-		  std::vector<float> trace = cController.get_policy_trace();
-		  for (int i = 0; i < 100 - 4; ++i) {			            
+		  CEpuckNNController& cController =
+			  dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
+		  std::vector<float> trace = cController.GetPolicyEligibilityTrace();
+		  for (int i = 0; i < size_policy_net; ++i) {			            
 			  policy_trace[i] += trace[i];			
     		  }
 	  } catch (std::exception &ex) {

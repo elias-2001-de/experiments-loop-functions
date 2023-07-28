@@ -22,7 +22,6 @@
 #include "../../src/CoreLoopFunctions.h"
 #include "../../../AC_trainer/src/shared_mem.h"
 #include "../../../argos3-nn/src/NNController.h"
-#include "../../../argos3-nn/src/DandelController.h"
 
 using namespace argos;
 
@@ -91,6 +90,8 @@ class Homing: public CoreLoopFunctions {
     // Vector state_prime;   // S' at step t+1
     at::Tensor state;
     at::Tensor state_prime;
+
+    int size_policy_net = 144;
 };
 
 #endif
