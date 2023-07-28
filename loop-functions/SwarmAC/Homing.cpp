@@ -131,9 +131,9 @@ void Homing::PreStep() {
   m_value->mutex.lock();
   for(auto w : m_value->vec){
       critic.push_back(w);
-      if(critic_weights.size() < 2501){
+      if(critic_weights.size() < 2500){
         critic_weights.push_back(w);
-      }else if (critic_weights.size() == 2501)
+      }else if (critic_weights.size() == 2500)
       {
         critic_bias.push_back(w);
       }
@@ -146,20 +146,22 @@ void Homing::PreStep() {
       if (p.key() == "fc.weight") {
         //std::cout << "critic weight accumulate: " << accumulate(critic_weights.begin(),critic_weights.end(),0.0) << std::endl;
         //std::cout << "Critic: " << critic << std::endl;
-        torch::Tensor new_weight_tensor = torch::from_blob(critic_weights.data(), {1, 2501});
+        torch::Tensor new_weight_tensor = torch::from_blob(critic_weights.data(), {1, 2500});
         p.value().data().copy_(new_weight_tensor);
       } else if (p.key() == "fc.bias") {
-        //std::cout << p.key() << "_critic: " << p.value() << std::endl;
         torch::Tensor new_bias_tensor = torch::from_blob(critic_bias.data(), {1});
+        std::cout << p.key() << "_critic: " << p.value() << std::endl;
         p.value().data().copy_(new_bias_tensor);
       }
   }
 
   // Load up-to-date policy network to each robot
   std::vector<float> actor;
+  std::cout << "Reading policy global shared vector\n";
   m_policy->mutex.lock();
   // 96 weights (24 * 4) + 4 bias for Dandelion
   // 288 weights (24 * 12) + 6 bias for Daisy
+  std::cout << "size global policy: " << m_policy->vec.size() << std::endl;
   for(auto w : m_policy->vec){
     actor.push_back(w);
     //std::cout << w << ", ";
@@ -179,7 +181,7 @@ void Homing::PreStep() {
       CEpuckNNController& cController =
       dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
       std::cout << "LOADNET\n";
-      cController.LoadNetwork(actor);
+      //cController.LoadNetwork(actor);
     } catch (std::exception &ex) {
       LOGERR << "Error while setting network: " << ex.what() << std::endl;
     }
@@ -233,8 +235,8 @@ void Homing::PostStep() {
     grid[grid_x-radius][grid_y] = 3;
     grid[grid_x][grid_y+radius] = 3;
     grid[grid_x][grid_y-radius] = 3;
-    std::cout << "State:\n";
-    print_grid(grid);
+    //std::cout << "State:\n";
+    //print_grid(grid);
     grid[grid_x][grid_y] = temp1;
     grid[grid_x+radius][grid_y] = temp2;
     grid[grid_x-radius][grid_y] = temp3;
