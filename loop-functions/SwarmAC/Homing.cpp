@@ -97,7 +97,6 @@ void Homing::Reset() {
 /****************************************/
 
 void Homing::PreStep() {
-  std::cout << "PreStep\n";
   // Observe state S
   /* Check position for each agent. 
    * If robot is in cell i --> 1
@@ -150,25 +149,25 @@ void Homing::PreStep() {
         p.value().data().copy_(new_weight_tensor);
       } else if (p.key() == "fc.bias") {
         torch::Tensor new_bias_tensor = torch::from_blob(critic_bias.data(), {1});
-        std::cout << p.key() << "_critic: " << p.value() << std::endl;
+        //std::cout << p.key() << "_critic: " << p.value() << std::endl;
         p.value().data().copy_(new_bias_tensor);
       }
   }
 
   // Load up-to-date policy network to each robot
   std::vector<float> actor;
-  std::cout << "Reading policy global shared vector\n";
+  //std::cout << "Reading policy global shared vector\n";
   m_policy->mutex.lock();
   // 96 weights (24 * 4) + 4 bias for Dandelion
   // 288 weights (24 * 12) + 6 bias for Daisy
-  std::cout << "size global policy: " << m_policy->vec.size() << std::endl;
+  //std::cout << "size global policy: " << m_policy->vec.size() << std::endl;
   for(auto w : m_policy->vec){
     actor.push_back(w);
     //std::cout << w << ", ";
   }
   m_policy->mutex.unlock();
-  std::cout <<" actor\n";
-  std::cout << "global policy size: " << actor.size() << std::endl;
+  //std::cout <<" actor\n";
+  //std::cout << "global policy size: " << actor.size() << std::endl;
    
   // Launch the experiment with the correct random seed and network,
   // and evaluate the average fitness
@@ -180,8 +179,8 @@ void Homing::PreStep() {
     try {
       CEpuckNNController& cController =
       dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
-      std::cout << "LOADNET\n";
-      //cController.LoadNetwork(actor);
+      //std::cout << "LOADNET\n";
+      cController.LoadNetwork(actor);
     } catch (std::exception &ex) {
       LOGERR << "Error while setting network: " << ex.what() << std::endl;
     }
