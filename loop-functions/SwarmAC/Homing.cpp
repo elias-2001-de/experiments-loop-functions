@@ -48,7 +48,7 @@ void Homing::Init(TConfigurationNode& t_tree) {
     delta = 0;
     policy_trace.resize(size_policy_net);
     std::fill(policy_trace.begin(), policy_trace.end(), 0.0f);
-    value_trace.resize(2501);
+    value_trace.resize(size_value_net);
     std::fill(value_trace.begin(), value_trace.end(), 0.0f);
 }
 
@@ -87,7 +87,7 @@ void Homing::Reset() {
   delta = 0;
   policy_trace.resize(size_policy_net);
   std::fill(policy_trace.begin(), policy_trace.end(), 0.0f);
-  value_trace.resize(2501);
+  value_trace.resize(size_value_net);
   std::fill(value_trace.begin(), value_trace.end(), 0.0f);
 
   CoreLoopFunctions::Reset();
@@ -130,7 +130,7 @@ void Homing::PreStep() {
   m_value->mutex.lock();
   for(auto w : m_value->vec){
       critic.push_back(w);
-      if(critic_weights.size() < 2500){
+      if(critic_weights.size() < size_value_net - 1){
         critic_weights.push_back(w);
       }else if (critic_weights.size() == 2500)
       {
@@ -191,6 +191,7 @@ void Homing::PreStep() {
 /****************************************/
 
 void Homing::PostStep() {
+  std::cout <<  "Homing postep\n";
   at::Tensor grid = torch::zeros({50, 50});
   CSpace::TMapPerType& tEpuckMap = GetSpace().GetEntitiesByType("epuck");
   CVector2 cEpuckPosition(0,0);
@@ -254,16 +255,14 @@ void Homing::PostStep() {
   state_prime = grid.view({-1}).clone();
 
   // Compute delta with Critic predictions
-  //Matrix v_state = m_criticNet.predict(state);
   torch::Tensor v_state = critic_net.forward(state);
-  //std::cout << "v(s) = " << v_state[0].item<float>() << std::endl;
-  //Matrix v_state_prime = m_criticNet.predict(state_prime);
+  std::cout << "v(s) = " << v_state[0].item<float>() << std::endl;
   torch::Tensor v_state_prime = critic_net.forward(state_prime);
-  //std::cout << "v(s') = " << v_state_prime[0].item<float>() << std::endl;
-  //delta = m_fObjectiveFunction + v_state(0) - v_state_prime(0);
+  std::cout << "v(s') = " << v_state_prime[0].item<float>() << std::endl;
   delta = m_unScoreSpot1 + v_state_prime[0].item<float>() - v_state[0].item<float>();
-  //std::cout << "delta = " << delta << std::endl;
-
+  std::cout << "reward = " << m_unScoreSpot1 << std::endl;
+  std::cout << "delta = " << delta << std::endl;
+  
   // Compute value trace
   // Zero out the gradients
   critic_net.zero_grad();
@@ -273,18 +272,19 @@ void Homing::PostStep() {
   auto weight_grad = params["fc.weight"].grad();
   auto bias_grad = params["fc.bias"].grad();
   //std::cout << "Weight gradients: " << weight_grad << std::endl;
-  //std::cout << "Bias gradients: " << bias_grad << std::endl;
+  std::cout << "Bias gradients: " << bias_grad << std::endl;
   weight_grad = weight_grad.view({-1});
   bias_grad = bias_grad.view({-1});
   float *weight_data = weight_grad.data_ptr<float>();
-  float lambda_critic = 0.8;
-  for (int i = 0; i < 2501; ++i) {
+  float lambda_critic = 0.7;
+  for (int i = 0; i < size_value_net - 1; ++i) {
 	  value_trace[i] = lambda_critic * value_trace[i] + weight_data[i];
   }
   float *bias_data = bias_grad.data_ptr<float>();
-  value_trace[2501] = lambda_critic * value_trace[2500] + bias_data[0];
-  //std::cout << "value trace bias: " << value_trace[-1] << std::endl;
-  //std::cout << "accumulate of trace: " << accumulate(value_trace.begin(),value_trace.end(),0.0) << std::endl;
+  value_trace[2500] = lambda_critic * value_trace[2500] + bias_data[0];
+  std::cout << "value trace bias: " << value_trace[-1] << std::endl;
+  std::cout << "accumulate of value weights: " << params["fc.weight"].sum() << std::endl;
+  std::cout << "accumulate of value trace: " << accumulate(value_trace.begin(),value_trace.end(),0.0) << std::endl;
 
   // Compute policy trace
   // TODO: add gradiant
@@ -312,7 +312,7 @@ void Homing::PostStep() {
 		  LOGERR << "Error while updating policy trace: " << ex.what() << std::endl;
 	  }
   }
-  //std::cout << "swarm policy trace: " << policy_trace << std::endl;
+  std::cout << "swarm policy trace: " << policy_trace << std::endl;
   // actor
   Data policy_data {delta, policy_trace};   
   std::string serialized_data = serialize(policy_data);

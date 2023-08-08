@@ -67,8 +67,13 @@ class Homing: public CoreLoopFunctions {
     // Network
     CRange<Real> m_cNeuralNetworkOutputRange;
     struct Net : torch::nn::Module {
-      Net() :
-          fc(register_module("fc", torch::nn::Linear(2500, 1))){}
+      Net()
+	     : fc(2500,1) 
+      {
+          //fc = register_module("fc", torch::nn::Linear(torch::nn::LinearOptions(2500, 1).bias(true)));			  
+          fc = register_module("fc", fc);			  
+      }
+
 
       // Implement the Net's algorithm.
       torch::Tensor forward(torch::Tensor x) {
@@ -91,7 +96,8 @@ class Homing: public CoreLoopFunctions {
     at::Tensor state;
     at::Tensor state_prime;
 
-    int size_policy_net = 288;
+    int size_value_net = 2501;
+    int size_policy_net = 300;  // daisy -> 300, dandel -> 100
 };
 
 #endif
