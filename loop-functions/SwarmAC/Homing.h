@@ -66,27 +66,34 @@ class Homing: public CoreLoopFunctions {
 
     // Network
     int input_size = 2500;
-    int hidden_size = 64;
+    int hidden_size = 6;
     int output_size = 1;
     CRange<Real> m_cNeuralNetworkOutputRange;
     struct Net : torch::nn::Module {
       Net()
-	     : fc_input(2500, 64),
-	       fc_output(64, 1) 
+	     : fc_input(2500, 6),
+	       dropout_input(0.5),
+	       fc_output(6, 1),
+	       dropout_output(0.5)
       {
-          register_module("fc_input", fc_input);			  
-          register_module("fc_output", fc_output);			  
+          register_module("fc_input", fc_input);
+          register_module("dropout_input", dropout_input);	  
+          register_module("fc_output", fc_output);			
+	  register_module("dropout_output", dropout_output);  
       }
 
 
       // Implement the Net's algorithm.
       torch::Tensor forward(torch::Tensor x) {
         x = torch::relu(fc_input(x));
+	x = dropout_input(x);
         x = torch::relu(fc_output(x));
+	x = dropout_output(x);
 	return x;
       };
 
       torch::nn::Linear fc_input, fc_output;
+      torch::nn::Dropout dropout_input, dropout_output;
     };
     Net critic_net; // Each thread will have its own `Net` instance
     
@@ -102,7 +109,7 @@ class Homing: public CoreLoopFunctions {
     at::Tensor state_prime;
 
     int size_value_net = (input_size * hidden_size + hidden_size) + (hidden_size * output_size + output_size);
-    int size_policy_net = 2380;
+    int size_policy_net = 234;
 };
 
 #endif

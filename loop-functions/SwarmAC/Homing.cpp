@@ -97,6 +97,7 @@ void Homing::Reset() {
 /****************************************/
 
 void Homing::PreStep() {
+  //std::cout << "Prestep\n";
   // Observe state S
   /* Check position for each agent. 
    * If robot is in cell i --> 1
@@ -339,8 +340,9 @@ void Homing::PostStep() {
 
   value_trace[input_size * hidden_size + hidden_size + hidden_size * output_size] = lambda_critic * value_trace[input_size * hidden_size + hidden_size + hidden_size * output_size] + fc_output_bias_data[0];
 
-  //std::cout << "accumulate of value weights: " << params["fc_input.weight"].sum() << std::endl;
-  //std::cout << "accumulate of value trace: " << accumulate(value_trace.begin(),value_trace.end(),0.0) << std::endl;
+  std::cout << "accumulate of value input weights: " << params["fc_input.weight"].sum() << std::endl;
+  std::cout << "accumulate of value output weights: " << params["fc_output.weight"].sum() << std::endl;
+  std::cout << "accumulate of value trace: " << accumulate(value_trace.begin(),value_trace.end(),0.0) << std::endl;
   /*
   auto params = critic_net.named_parameters();
   auto weight_grad = params["fc.weight"].grad();
@@ -385,7 +387,7 @@ void Homing::PostStep() {
 		  LOGERR << "Error while updating policy trace: " << ex.what() << std::endl;
 	  }
   }
-  //std::cout << "accumulate swarm policy trace: " << accumulate(policy_trace.begin(),policy_trace.end(),0.0) << std::endl;
+  std::cout << "accumulate swarm policy trace: " << accumulate(policy_trace.begin(),policy_trace.end(),0.0) << std::endl;
   // actor
   Data policy_data {delta, policy_trace};   
   std::string serialized_data = serialize(policy_data);
