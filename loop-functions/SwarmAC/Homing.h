@@ -65,23 +65,28 @@ class Homing: public CoreLoopFunctions {
     zmq::socket_t m_socket_critic;
 
     // Network
+    int input_size = 2500;
+    int hidden_size = 64;
+    int output_size = 1;
     CRange<Real> m_cNeuralNetworkOutputRange;
     struct Net : torch::nn::Module {
       Net()
-	     : fc(2500,1) 
+	     : fc_input(2500, 64),
+	       fc_output(64, 1) 
       {
-          //fc = register_module("fc", torch::nn::Linear(torch::nn::LinearOptions(2500, 1).bias(true)));			  
-          fc = register_module("fc", fc);			  
+          register_module("fc_input", fc_input);			  
+          register_module("fc_output", fc_output);			  
       }
 
 
       // Implement the Net's algorithm.
       torch::Tensor forward(torch::Tensor x) {
-        x = torch::relu(fc(x));
+        x = torch::relu(fc_input(x));
+        x = torch::relu(fc_output(x));
 	return x;
       };
 
-      torch::nn::Linear fc;
+      torch::nn::Linear fc_input, fc_output;
     };
     Net critic_net; // Each thread will have its own `Net` instance
     
@@ -96,8 +101,8 @@ class Homing: public CoreLoopFunctions {
     at::Tensor state;
     at::Tensor state_prime;
 
-    int size_value_net = 2501;
-    int size_policy_net = 300;  // daisy -> 300, dandel -> 100
+    int size_value_net = (input_size * hidden_size + hidden_size) + (hidden_size * output_size + output_size);
+    int size_policy_net = 2380;
 };
 
 #endif

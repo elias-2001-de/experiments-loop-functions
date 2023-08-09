@@ -123,13 +123,20 @@ void Homing::PreStep() {
 
   // Load up-to-date value network
   std::vector<float> critic;
-  std::vector<float> critic_weights;
-  std::vector<float> critic_bias;
+  std::vector<float> fc_input_weights;
+  std::vector<float> fc_input_bias;
+  std::vector<float> fc_output_weights;
+  std::vector<float> fc_output_bias;
 
+  const int fc_input_weights_count = input_size * hidden_size;  // input_features * output_features
+  //const int fc_hidden_weights_count = 128 * 64;
+  
   // Assuming dimensions of weights {output_features, input_features} for fc1 layer
+  /*
   m_value->mutex.lock();
   for(auto w : m_value->vec){
       critic.push_back(w);
+
       if(critic_weights.size() < size_value_net - 1){
         critic_weights.push_back(w);
       }else if (critic_weights.size() == 2500)
@@ -139,7 +146,6 @@ void Homing::PreStep() {
     //std::cout << w << ", ";
   }
   m_value->mutex.unlock();
-  //std::cout << "Critic parameters: " << critic_net.parameters() << std::endl;
   // Upadate critic weights and bias
   for (auto& p : critic_net.named_parameters()) {
       if (p.key() == "fc.weight") {
@@ -152,8 +158,38 @@ void Homing::PreStep() {
         //std::cout << p.key() << "_critic: " << p.value() << std::endl;
         p.value().data().copy_(new_bias_tensor);
       }
+  }*/
+  m_value->mutex.lock();
+  for (auto w : m_value->vec) {
+      critic.push_back(w);
+      if (fc_input_weights.size() < fc_input_weights_count) {
+          fc_input_weights.push_back(w);
+      } else if (fc_input_weights.size() == fc_input_weights_count && fc_input_bias.size() < hidden_size) {
+          fc_input_bias.push_back(w);
+      } else {
+          fc_output_weights.push_back(w);
+          if (fc_output_weights.size() == hidden_size) {
+              fc_output_bias.push_back(w);
+          }
+      }
   }
-
+  m_value->mutex.unlock();
+  // Update critic_net weights and bias
+  for (auto& p : critic_net.named_parameters()) {
+      if (p.key() == "fc_input.weight") {
+          torch::Tensor new_weight_tensor = torch::from_blob(fc_input_weights.data(), {hidden_size, input_size});
+          p.value().data().copy_(new_weight_tensor);
+      } else if (p.key() == "fc_input.bias") {
+          torch::Tensor new_bias_tensor = torch::from_blob(fc_input_bias.data(), {hidden_size});
+          p.value().data().copy_(new_bias_tensor);
+      } else if (p.key() == "fc_output.weight") {
+          torch::Tensor new_weight_tensor = torch::from_blob(fc_output_weights.data(), {output_size, hidden_size});
+          p.value().data().copy_(new_weight_tensor);
+      } else if (p.key() == "fc_output.bias") {
+          torch::Tensor new_bias_tensor = torch::from_blob(fc_output_bias.data(), {output_size});
+          p.value().data().copy_(new_bias_tensor);
+      }
+  }
   // Load up-to-date policy network to each robot
   std::vector<float> actor;
   //std::cout << "Reading policy global shared vector\n";
@@ -191,7 +227,6 @@ void Homing::PreStep() {
 /****************************************/
 
 void Homing::PostStep() {
-  std::cout <<  "Homing postep\n";
   at::Tensor grid = torch::zeros({50, 50});
   CSpace::TMapPerType& tEpuckMap = GetSpace().GetEntitiesByType("epuck");
   CVector2 cEpuckPosition(0,0);
@@ -256,23 +291,62 @@ void Homing::PostStep() {
 
   // Compute delta with Critic predictions
   torch::Tensor v_state = critic_net.forward(state);
-  std::cout << "v(s) = " << v_state[0].item<float>() << std::endl;
+  //std::cout << "v(s) = " << v_state[0].item<float>() << std::endl;
   torch::Tensor v_state_prime = critic_net.forward(state_prime);
-  std::cout << "v(s') = " << v_state_prime[0].item<float>() << std::endl;
+  //std::cout << "v(s') = " << v_state_prime[0].item<float>() << std::endl;
   delta = m_unScoreSpot1 + v_state_prime[0].item<float>() - v_state[0].item<float>();
-  std::cout << "reward = " << m_unScoreSpot1 << std::endl;
-  std::cout << "delta = " << delta << std::endl;
+  //std::cout << "reward = " << m_unScoreSpot1 << std::endl;
+  //std::cout << "delta = " << delta << std::endl;
   
   // Compute value trace
   // Zero out the gradients
   critic_net.zero_grad();
   // Compute the gradient by back-propagation
   v_state.backward();
+
+  auto params = critic_net.named_parameters();
+  auto fc_input_weight_grad = params["fc_input.weight"].grad();
+  auto fc_input_bias_grad = params["fc_input.bias"].grad();
+  auto fc_output_weight_grad = params["fc_output.weight"].grad();
+  auto fc_output_bias_grad = params["fc_output.bias"].grad();
+
+  // Flatten the gradient tensors
+  fc_input_weight_grad = fc_input_weight_grad.view({-1});
+  fc_output_weight_grad = fc_output_weight_grad.view({-1});
+  fc_input_bias_grad = fc_input_bias_grad.view({-1});
+  fc_output_bias_grad = fc_output_bias_grad.view({-1});
+
+  float* fc_input_weight_data = fc_input_weight_grad.data_ptr<float>();
+  float* fc_output_weight_data = fc_output_weight_grad.data_ptr<float>();
+  float* fc_input_bias_data = fc_input_bias_grad.data_ptr<float>();
+  float* fc_output_bias_data = fc_output_bias_grad.data_ptr<float>();
+
+  float lambda_critic = 0.7;
+
+  // Update the value_trace based on the gradients for fc_input (weights and biases)
+  for (int i = 0; i < input_size * hidden_size; ++i) {
+      value_trace[i] = lambda_critic * value_trace[i] + fc_input_weight_data[i];
+  }
+
+  for (int i = input_size * hidden_size; i < (input_size * hidden_size + hidden_size); ++i) {
+      value_trace[i] = lambda_critic * value_trace[i] + fc_input_bias_data[i - input_size * hidden_size];
+  }
+
+  // Update the value_trace based on the gradients for fc_output (weights and biases)
+  for (int i = input_size * hidden_size + hidden_size; i < (input_size * hidden_size + hidden_size + hidden_size * output_size); ++i) {
+      value_trace[i] = lambda_critic * value_trace[i] + fc_output_weight_data[i - input_size * hidden_size - hidden_size];
+  }
+
+  value_trace[input_size * hidden_size + hidden_size + hidden_size * output_size] = lambda_critic * value_trace[input_size * hidden_size + hidden_size + hidden_size * output_size] + fc_output_bias_data[0];
+
+  //std::cout << "accumulate of value weights: " << params["fc_input.weight"].sum() << std::endl;
+  //std::cout << "accumulate of value trace: " << accumulate(value_trace.begin(),value_trace.end(),0.0) << std::endl;
+  /*
   auto params = critic_net.named_parameters();
   auto weight_grad = params["fc.weight"].grad();
   auto bias_grad = params["fc.bias"].grad();
   //std::cout << "Weight gradients: " << weight_grad << std::endl;
-  std::cout << "Bias gradients: " << bias_grad << std::endl;
+  //std::cout << "Bias gradients: " << bias_grad << std::endl;
   weight_grad = weight_grad.view({-1});
   bias_grad = bias_grad.view({-1});
   float *weight_data = weight_grad.data_ptr<float>();
@@ -282,9 +356,8 @@ void Homing::PostStep() {
   }
   float *bias_data = bias_grad.data_ptr<float>();
   value_trace[2500] = lambda_critic * value_trace[2500] + bias_data[0];
-  std::cout << "value trace bias: " << value_trace[-1] << std::endl;
-  std::cout << "accumulate of value weights: " << params["fc.weight"].sum() << std::endl;
-  std::cout << "accumulate of value trace: " << accumulate(value_trace.begin(),value_trace.end(),0.0) << std::endl;
+  */
+  //std::cout << "value trace bias: " << value_trace[-1] << std::endl;
 
   // Compute policy trace
   // TODO: add gradiant
@@ -312,7 +385,7 @@ void Homing::PostStep() {
 		  LOGERR << "Error while updating policy trace: " << ex.what() << std::endl;
 	  }
   }
-  std::cout << "swarm policy trace: " << policy_trace << std::endl;
+  //std::cout << "accumulate swarm policy trace: " << accumulate(policy_trace.begin(),policy_trace.end(),0.0) << std::endl;
   // actor
   Data policy_data {delta, policy_trace};   
   std::string serialized_data = serialize(policy_data);
