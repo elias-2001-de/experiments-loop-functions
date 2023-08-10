@@ -109,7 +109,7 @@ class Homing: public CoreLoopFunctions {
     at::Tensor state_prime;
 
     int size_value_net = (input_size * hidden_size + hidden_size) + (hidden_size * output_size + output_size);
-    int size_policy_net = 234;
+    int size_policy_net = 178;
 };
 
 #endif

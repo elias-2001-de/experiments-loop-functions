@@ -272,7 +272,7 @@ void Homing::PostStep() {
     grid[grid_x][grid_y+radius] = 3;
     grid[grid_x][grid_y-radius] = 3;
     //std::cout << "State:\n";
-    //print_grid(grid);
+    print_grid(grid);
     grid[grid_x][grid_y] = temp1;
     grid[grid_x+radius][grid_y] = temp2;
     grid[grid_x-radius][grid_y] = temp3;
@@ -297,7 +297,7 @@ void Homing::PostStep() {
   //std::cout << "v(s') = " << v_state_prime[0].item<float>() << std::endl;
   delta = m_unScoreSpot1 + v_state_prime[0].item<float>() - v_state[0].item<float>();
   //std::cout << "reward = " << m_unScoreSpot1 << std::endl;
-  //std::cout << "delta = " << delta << std::endl;
+  std::cout << "delta = " << delta << std::endl;
   
   // Compute value trace
   // Zero out the gradients
@@ -340,8 +340,8 @@ void Homing::PostStep() {
 
   value_trace[input_size * hidden_size + hidden_size + hidden_size * output_size] = lambda_critic * value_trace[input_size * hidden_size + hidden_size + hidden_size * output_size] + fc_output_bias_data[0];
 
-  std::cout << "accumulate of value input weights: " << params["fc_input.weight"].sum() << std::endl;
-  std::cout << "accumulate of value output weights: " << params["fc_output.weight"].sum() << std::endl;
+  //std::cout << "accumulate of value input weights: " << params["fc_input.weight"].sum() << std::endl;
+  //std::cout << "accumulate of value output weights: " << params["fc_output.weight"].sum() << std::endl;
   std::cout << "accumulate of value trace: " << accumulate(value_trace.begin(),value_trace.end(),0.0) << std::endl;
   /*
   auto params = critic_net.named_parameters();
@@ -371,7 +371,8 @@ void Homing::PostStep() {
   */
   //std::cout <<" policy_tarce\n";
   
-  CSpace::TMapPerType cEntities = GetSpace().GetEntitiesByType("controller");  
+  CSpace::TMapPerType cEntities = GetSpace().GetEntitiesByType("controller"); 
+  std::fill(policy_trace.begin(), policy_trace.end(), 0.0f); 
   for (CSpace::TMapPerType::iterator it = cEntities.begin();
 		  it != cEntities.end(); ++it) {
 	  CControllableEntity *pcEntity =
