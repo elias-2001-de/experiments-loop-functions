@@ -72,9 +72,9 @@ class Homing: public CoreLoopFunctions {
     struct Net : torch::nn::Module {
       Net()
 	     : fc_input(2500, 6),
-	       dropout_input(0.5),
+	       dropout_input(0.1),
 	       fc_output(6, 1),
-	       dropout_output(0.5)
+	       dropout_output(0.1)
       {
           register_module("fc_input", fc_input);
           register_module("dropout_input", dropout_input);	  

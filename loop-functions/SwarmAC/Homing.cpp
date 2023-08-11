@@ -175,6 +175,7 @@ void Homing::PreStep() {
       }
   }
   m_value->mutex.unlock();
+  //std::cout << "accumulate of value weights: " << accumulate(critic.begin(),critic.end(),0.0) << std::endl;
   // Update critic_net weights and bias
   for (auto& p : critic_net.named_parameters()) {
       if (p.key() == "fc_input.weight") {
@@ -203,6 +204,7 @@ void Homing::PreStep() {
     //std::cout << w << ", ";
   }
   m_policy->mutex.unlock();
+  //std::cout << "accumulate of policy weights: " << accumulate(actor.begin(),actor.end(),0.0) << std::endl;
   //std::cout <<" actor\n";
   //std::cout << "global policy size: " << actor.size() << std::endl;
    
@@ -272,7 +274,7 @@ void Homing::PostStep() {
     grid[grid_x][grid_y+radius] = 3;
     grid[grid_x][grid_y-radius] = 3;
     //std::cout << "State:\n";
-    print_grid(grid);
+    //print_grid(grid);
     grid[grid_x][grid_y] = temp1;
     grid[grid_x+radius][grid_y] = temp2;
     grid[grid_x-radius][grid_y] = temp3;
@@ -291,13 +293,14 @@ void Homing::PostStep() {
   state_prime = grid.view({-1}).clone();
 
   // Compute delta with Critic predictions
+  int gamma = 0.9;
   torch::Tensor v_state = critic_net.forward(state);
   //std::cout << "v(s) = " << v_state[0].item<float>() << std::endl;
   torch::Tensor v_state_prime = critic_net.forward(state_prime);
   //std::cout << "v(s') = " << v_state_prime[0].item<float>() << std::endl;
-  delta = m_unScoreSpot1 + v_state_prime[0].item<float>() - v_state[0].item<float>();
+  delta = m_unScoreSpot1 + gamma * v_state_prime[0].item<float>() - v_state[0].item<float>();
   //std::cout << "reward = " << m_unScoreSpot1 << std::endl;
-  std::cout << "delta = " << delta << std::endl;
+  //std::cout << "delta = " << delta << std::endl;
   
   // Compute value trace
   // Zero out the gradients
@@ -322,7 +325,7 @@ void Homing::PostStep() {
   float* fc_input_bias_data = fc_input_bias_grad.data_ptr<float>();
   float* fc_output_bias_data = fc_output_bias_grad.data_ptr<float>();
 
-  float lambda_critic = 0.7;
+  float lambda_critic = 0.9;
 
   // Update the value_trace based on the gradients for fc_input (weights and biases)
   for (int i = 0; i < input_size * hidden_size; ++i) {
@@ -342,7 +345,7 @@ void Homing::PostStep() {
 
   //std::cout << "accumulate of value input weights: " << params["fc_input.weight"].sum() << std::endl;
   //std::cout << "accumulate of value output weights: " << params["fc_output.weight"].sum() << std::endl;
-  std::cout << "accumulate of value trace: " << accumulate(value_trace.begin(),value_trace.end(),0.0) << std::endl;
+  //std::cout << "accumulate of value trace: " << accumulate(value_trace.begin(),value_trace.end(),0.0) << std::endl;
   /*
   auto params = critic_net.named_parameters();
   auto weight_grad = params["fc.weight"].grad();
@@ -388,7 +391,7 @@ void Homing::PostStep() {
 		  LOGERR << "Error while updating policy trace: " << ex.what() << std::endl;
 	  }
   }
-  std::cout << "accumulate swarm policy trace: " << accumulate(policy_trace.begin(),policy_trace.end(),0.0) << std::endl;
+  //std::cout << "accumulate swarm policy trace: " << accumulate(policy_trace.begin(),policy_trace.end(),0.0) << std::endl;
   // actor
   Data policy_data {delta, policy_trace};   
   std::string serialized_data = serialize(policy_data);
