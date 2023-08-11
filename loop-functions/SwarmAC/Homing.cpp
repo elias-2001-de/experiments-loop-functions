@@ -130,36 +130,7 @@ void Homing::PreStep() {
   std::vector<float> fc_output_bias;
 
   const int fc_input_weights_count = input_size * hidden_size;  // input_features * output_features
-  //const int fc_hidden_weights_count = 128 * 64;
   
-  // Assuming dimensions of weights {output_features, input_features} for fc1 layer
-  /*
-  m_value->mutex.lock();
-  for(auto w : m_value->vec){
-      critic.push_back(w);
-
-      if(critic_weights.size() < size_value_net - 1){
-        critic_weights.push_back(w);
-      }else if (critic_weights.size() == 2500)
-      {
-        critic_bias.push_back(w);
-      }
-    //std::cout << w << ", ";
-  }
-  m_value->mutex.unlock();
-  // Upadate critic weights and bias
-  for (auto& p : critic_net.named_parameters()) {
-      if (p.key() == "fc.weight") {
-        //std::cout << "critic weight accumulate: " << accumulate(critic_weights.begin(),critic_weights.end(),0.0) << std::endl;
-        //std::cout << "Critic: " << critic << std::endl;
-        torch::Tensor new_weight_tensor = torch::from_blob(critic_weights.data(), {1, 2500});
-        p.value().data().copy_(new_weight_tensor);
-      } else if (p.key() == "fc.bias") {
-        torch::Tensor new_bias_tensor = torch::from_blob(critic_bias.data(), {1});
-        //std::cout << p.key() << "_critic: " << p.value() << std::endl;
-        p.value().data().copy_(new_bias_tensor);
-      }
-  }*/
   m_value->mutex.lock();
   for (auto w : m_value->vec) {
       critic.push_back(w);
@@ -238,7 +209,6 @@ void Homing::PostStep() {
     CEPuckEntity* pcEpuck = any_cast<CEPuckEntity*>(it->second);
     cEpuckPosition.Set(pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetX(),
                        pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetY());
-
     
     // Scale the position to the grid size
     int grid_x = static_cast<int>(std::round((cEpuckPosition.GetX() + 1.231) / 2.462 * 49));
@@ -252,34 +222,33 @@ void Homing::PostStep() {
     }
     
     // Set the grid cell that corresponds to the epuck's position to 1
-    //grid(grid_y, grid_x) = 1;
     grid[grid_x][grid_y] = 1;
   }
   
   //if(m_unScoreSpot1 > 0){
-    //std::cout << "score: " << m_unScoreSpot1 << std::endl;	  
-    // place spot in grid
-    int grid_x = static_cast<int>(std::round((m_cCoordSpot1.GetX() + 1.231) / 2.462 * 49));
-    int grid_y = static_cast<int>(std::round((-m_cCoordSpot1.GetY() + 1.231) / 2.462 * 49));
-    int radius = static_cast<int>(std::round(0.35 / 2.462 * 49));
-    // Print arena on the terminal
-    auto temp1 = grid[grid_x][grid_y];
-    auto temp2 = grid[grid_x+radius][grid_y];
-    auto temp3 = grid[grid_x-radius][grid_y];
-    auto temp4 = grid[grid_x][grid_y+radius];
-    auto temp5 = grid[grid_x][grid_y-radius];
-    grid[grid_x][grid_y] = 2;
-    grid[grid_x+radius][grid_y] = 3;
-    grid[grid_x-radius][grid_y] = 3;
-    grid[grid_x][grid_y+radius] = 3;
-    grid[grid_x][grid_y-radius] = 3;
-    //std::cout << "State:\n";
-    //print_grid(grid);
-    grid[grid_x][grid_y] = temp1;
-    grid[grid_x+radius][grid_y] = temp2;
-    grid[grid_x-radius][grid_y] = temp3;
-    grid[grid_x][grid_y+radius] = temp4;
-    grid[grid_x][grid_y-radius] = temp5;
+  //std::cout << "score: " << m_unScoreSpot1 << std::endl;	  
+  // place spot in grid
+  int grid_x = static_cast<int>(std::round((m_cCoordSpot1.GetX() + 1.231) / 2.462 * 49));
+  int grid_y = static_cast<int>(std::round((-m_cCoordSpot1.GetY() + 1.231) / 2.462 * 49));
+  int radius = static_cast<int>(std::round(0.35 / 2.462 * 49));
+  // Print arena on the terminal
+  auto temp1 = grid[grid_x][grid_y];
+  auto temp2 = grid[grid_x+radius][grid_y];
+  auto temp3 = grid[grid_x-radius][grid_y];
+  auto temp4 = grid[grid_x][grid_y+radius];
+  auto temp5 = grid[grid_x][grid_y-radius];
+  grid[grid_x][grid_y] = 2;
+  grid[grid_x+radius][grid_y] = 3;
+  grid[grid_x-radius][grid_y] = 3;
+  grid[grid_x][grid_y+radius] = 3;
+  grid[grid_x][grid_y-radius] = 3;
+  //std::cout << "State:\n";
+  //print_grid(grid);
+  grid[grid_x][grid_y] = temp1;
+  grid[grid_x+radius][grid_y] = temp2;
+  grid[grid_x-radius][grid_y] = temp3;
+  grid[grid_x][grid_y+radius] = temp4;
+  grid[grid_x][grid_y-radius] = temp5;
   //}
   //m_fObjectiveFunction = m_unScoreSpot1/(Real) m_unNumberRobots;
   //LOG << "Score = " << m_fObjectiveFunction << std::endl;
@@ -346,32 +315,7 @@ void Homing::PostStep() {
   //std::cout << "accumulate of value input weights: " << params["fc_input.weight"].sum() << std::endl;
   //std::cout << "accumulate of value output weights: " << params["fc_output.weight"].sum() << std::endl;
   //std::cout << "accumulate of value trace: " << accumulate(value_trace.begin(),value_trace.end(),0.0) << std::endl;
-  /*
-  auto params = critic_net.named_parameters();
-  auto weight_grad = params["fc.weight"].grad();
-  auto bias_grad = params["fc.bias"].grad();
-  //std::cout << "Weight gradients: " << weight_grad << std::endl;
-  //std::cout << "Bias gradients: " << bias_grad << std::endl;
-  weight_grad = weight_grad.view({-1});
-  bias_grad = bias_grad.view({-1});
-  float *weight_data = weight_grad.data_ptr<float>();
-  float lambda_critic = 0.7;
-  for (int i = 0; i < size_value_net - 1; ++i) {
-	  value_trace[i] = lambda_critic * value_trace[i] + weight_data[i];
-  }
-  float *bias_data = bias_grad.data_ptr<float>();
-  value_trace[2500] = lambda_critic * value_trace[2500] + bias_data[0];
-  */
   //std::cout << "value trace bias: " << value_trace[-1] << std::endl;
-
-  // Compute policy trace
-  // TODO: add gradiant
-  /*
-  for(auto& element : policy_trace) {
-    element *= 0.01;     //lambda
-    //std::cout << element << ", ";
-  }
-  */
   //std::cout <<" policy_tarce\n";
   
   CSpace::TMapPerType cEntities = GetSpace().GetEntitiesByType("controller"); 
@@ -561,6 +505,4 @@ void Homing::print_grid(at::Tensor grid){
     std::cout << "+" << std::endl;
 }
 
-/****************************************/
-/****************************************/
 REGISTER_LOOP_FUNCTIONS(Homing, "homing");

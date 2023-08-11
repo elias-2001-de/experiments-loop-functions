@@ -79,17 +79,17 @@ class Homing: public CoreLoopFunctions {
           register_module("fc_input", fc_input);
           register_module("dropout_input", dropout_input);	  
           register_module("fc_output", fc_output);			
-	  register_module("dropout_output", dropout_output);  
+	        register_module("dropout_output", dropout_output);  
       }
 
 
       // Implement the Net's algorithm.
       torch::Tensor forward(torch::Tensor x) {
         x = torch::relu(fc_input(x));
-	x = dropout_input(x);
+	      x = dropout_input(x);
         x = torch::relu(fc_output(x));
-	x = dropout_output(x);
-	return x;
+	      x = dropout_output(x);
+	      return x;
       };
 
       torch::nn::Linear fc_input, fc_output;
