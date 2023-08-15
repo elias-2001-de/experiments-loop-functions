@@ -112,4 +112,4 @@ CVector3 AACTestLoopFunc::GetRandomPosition() {
   return CVector3(fPosX, fPosY, 0);
 }
 
-REGISTER_LOOP_FUNCTIONS(AACTestLoopFunc, "chocolate_aac_loop_functions");
+REGISTER_LOOP_FUNCTIONS(AACTestLoopFunc, "aac_test_loop_functions");
