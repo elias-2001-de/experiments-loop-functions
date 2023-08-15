@@ -7,7 +7,7 @@
 #ifndef CHOCOLATE_AAC_LOOP_FUNC_H
 #define CHOCOLATE_AAC_LOOP_FUNC_H
 
-#include "../../../src/CoreLoopFunctions.h"
+#include "../../src/CoreLoopFunctions.h"
 #include <argos3/core/simulator/space/space.h>
 #include <argos3/plugins/robots/e-puck/simulator/epuck_entity.h>
 

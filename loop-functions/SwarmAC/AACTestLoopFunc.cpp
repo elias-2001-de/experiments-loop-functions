@@ -83,7 +83,7 @@ void AACTestLoopFunc::PostStep() {
 /****************************************/
 /****************************************/
 
-void AACLoopFunction::PostExperiment() {
+void AACTestLoopFunc::PostExperiment() {
   LOG << "Score = " << m_fObjectiveFunction << std::endl;
 }
 /****************************************/
