@@ -394,7 +394,7 @@ CVector3 Homing::GetRandomPosition() {
 /****************************************/
 
 // Function to compute the log-PDF of the Beta distribution
-double computeBetaLogPDF(double alpha, double beta, double x) {
+double Homing::computeBetaLogPDF(double alpha, double beta, double x) {
     // Compute the logarithm of the Beta function
     double logBeta = std::lgamma(alpha) + std::lgamma(beta) - std::lgamma(alpha + beta);
 

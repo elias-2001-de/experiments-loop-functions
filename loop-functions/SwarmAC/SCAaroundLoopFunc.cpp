@@ -315,7 +315,7 @@ void SCAaroundLoopFunction::PostStep() {
   //std::cout << "v(s) = " << v_state[0].item<float>() << std::endl;
   torch::Tensor v_state_prime = critic_net.forward(state_prime);
   //std::cout << "v(s') = " << v_state_prime[0].item<float>() << std::endl;
-  delta = m_unScoreSpot1 + gamma * v_state_prime[0].item<float>() - v_state[0].item<float>();
+  delta = m_fObjectiveFunction + gamma * v_state_prime[0].item<float>() - v_state[0].item<float>();
   //std::cout << "reward = " << m_unScoreSpot1 << std::endl;
   //std::cout << "delta = " << delta << std::endl;
   
@@ -426,7 +426,7 @@ CVector3 SCAaroundLoopFunction::GetRandomPosition() {
 /****************************************/
 
 // Function to compute the log-PDF of the Beta distribution
-double computeBetaLogPDF(double alpha, double beta, double x) {
+double SCAaroundLoopFunction::computeBetaLogPDF(double alpha, double beta, double x) {
     // Compute the logarithm of the Beta function
     double logBeta = std::lgamma(alpha) + std::lgamma(beta) - std::lgamma(alpha + beta);
 
