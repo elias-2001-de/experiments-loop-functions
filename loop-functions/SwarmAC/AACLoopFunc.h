@@ -9,7 +9,7 @@
 
 #include <torch/torch.h>
 
-#include "../../../src/CoreLoopFunctions.h"
+#include "../../src/CoreLoopFunctions.h"
 #include <argos3/core/simulator/space/space.h>
 #include <argos3/plugins/robots/e-puck/simulator/epuck_entity.h>
 
@@ -31,7 +31,7 @@ class AACLoopFunction : public CoreLoopFunctions {
       virtual ~AACLoopFunction();
 
       virtual void Destroy();
-      virtual void Init();
+      virtual void Init(TConfigurationNode& t_tree);
       virtual void Reset();
       virtual void PreStep();
       virtual void PostStep();
@@ -65,34 +65,34 @@ class AACLoopFunction : public CoreLoopFunctions {
 
       // Network
       int input_size = 2500;
-      int hidden_size = 6;
+      int hidden_size = 1;
       int output_size = 1;
       CRange<Real> m_cNeuralNetworkOutputRange;
       struct Net : torch::nn::Module {
         Net()
-        : fc_input(2500, 6),
+        : fc_input(2500, 1)/*6),
           dropout_input(0.1),
           fc_output(6, 1),
-          dropout_output(0.1)
+          dropout_output(0.1)*/
         {
-            register_module("fc_input", fc_input);
+            register_module("fc_input", fc_input);/*
             register_module("dropout_input", dropout_input);	  
             register_module("fc_output", fc_output);			
-            register_module("dropout_output", dropout_output);  
+            register_module("dropout_output", dropout_output);*/  
         }
 
 
         // Implement the Net's algorithm.
         torch::Tensor forward(torch::Tensor x) {
-          x = torch::relu(fc_input(x));
+          x = torch::relu(fc_input(x));/*
           x = dropout_input(x);
           x = torch::relu(fc_output(x));
-          x = dropout_output(x);
+          x = dropout_output(x);*/
           return x;
         };
 
-        torch::nn::Linear fc_input, fc_output;
-        torch::nn::Dropout dropout_input, dropout_output;
+        torch::nn::Linear fc_input;/*, fc_output;
+        torch::nn::Dropout dropout_input, dropout_output;*/
       };
       Net critic_net; // Each thread will have its own `Net` instance
       
@@ -107,8 +107,8 @@ class AACLoopFunction : public CoreLoopFunctions {
       at::Tensor state;
       at::Tensor state_prime;
 
-      int size_value_net = (input_size * hidden_size + hidden_size) + (hidden_size * output_size + output_size);
-      int size_policy_net = 178;
+      int size_value_net = (input_size * hidden_size + hidden_size); //+ (hidden_size * output_size + output_size);
+      int size_policy_net = 100;
 };
 
 #endif
