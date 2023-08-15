@@ -10,6 +10,8 @@ add_library(swarmac_loopfunc SHARED
                           Homing.cpp
                           AggregationTwoSpotsXOR2.h
                           AggregationTwoSpotsXOR2.cpp
+                          AACLoopFunc.h
+                          AACLoopFunc.cpp
                           ${LOOP_HEADERS}
                           ${LOOP_SOURCES})
 
