@@ -383,7 +383,7 @@ CVector3 AACLoopFunction::GetRandomPosition() {
 /****************************************/
 
 // Function to compute the log-PDF of the Beta distribution
-double Homing::computeBetaLogPDF(double alpha, double beta, double x) {
+double AACLoopFunction::computeBetaLogPDF(double alpha, double beta, double x) {
     // Compute the logarithm of the Beta function
     double logBeta = std::lgamma(alpha) + std::lgamma(beta) - std::lgamma(alpha + beta);
 
@@ -399,7 +399,7 @@ double Homing::computeBetaLogPDF(double alpha, double beta, double x) {
 // Assuming actor_net is your Actor Neural Network (an instance of torch::nn::Module)
 // Assuming behavior_probs, beta_parameters, chosen_behavior, chosen_parameter, and td_error are already computed
 
-void Homing::update_actor(torch::nn::Module& actor_net, torch::Tensor& behavior_probs, 
+void AACLoopFunction::update_actor(torch::nn::Module& actor_net, torch::Tensor& behavior_probs, 
                   torch::Tensor& beta_parameters, int chosen_behavior, 
                   double chosen_parameter, double td_error, 
                   torch::optim::Optimizer& optimizer) {
@@ -431,7 +431,7 @@ void Homing::update_actor(torch::nn::Module& actor_net, torch::Tensor& behavior_
 /****************************************/
 /****************************************/
 
-void Homing::print_grid(at::Tensor grid){
+void AACLoopFunction::print_grid(at::Tensor grid){
     // Get the size of the grid tensor
     auto sizes = grid.sizes();
     int rows = sizes[0];
