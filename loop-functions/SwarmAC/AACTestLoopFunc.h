@@ -7,6 +7,8 @@
 #ifndef CHOCOLATE_AAC_LOOP_FUNC_H
 #define CHOCOLATE_AAC_LOOP_FUNC_H
 
+#include <torch/torch.h>
+
 #include "../../src/CoreLoopFunctions.h"
 #include <argos3/core/simulator/space/space.h>
 #include <argos3/plugins/robots/e-puck/simulator/epuck_entity.h>
@@ -30,6 +32,8 @@ class AACTestLoopFunc : public CoreLoopFunctions {
       virtual CColor GetFloorColor(const CVector2& c_position_on_plane);
 
       virtual CVector3 GetRandomPosition();
+
+      void print_grid(at::Tensor grid);
 
     private:
       Real m_fRadius;
