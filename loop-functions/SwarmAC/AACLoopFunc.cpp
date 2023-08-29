@@ -68,8 +68,6 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
   m_socket_critic = zmq::socket_t(m_context, ZMQ_PUSH);
   m_socket_critic.connect("tcp://localhost:5556");
 
-  // Critic network
-
   // Initialise traces and delta
   delta = 0;
   policy_trace.resize(size_policy_net);
@@ -123,15 +121,15 @@ void AACLoopFunction::PreStep() {
     grid[grid_x][grid_y] = 1;
   }
   // Flatten the 2D tensor to 1D for net input
-  state = grid.view({-1}).clone();
+  state = grid.view({1, 1, 50, 50}).clone();
   state.set_requires_grad(true);
 
   // Load up-to-date value network
   std::vector<float> critic;
   std::vector<float> fc_input_weights;
-  std::vector<float> fc_input_bias;
-  std::vector<float> fc_output_weights;
-  std::vector<float> fc_output_bias;
+  //std::vector<float> fc_input_bias;
+  //std::vector<float> fc_output_weights;
+  //std::vector<float> fc_output_bias;
 
   const int fc_input_weights_count = input_size * hidden_size;  // input_features * output_features
   
@@ -140,24 +138,28 @@ void AACLoopFunction::PreStep() {
       critic.push_back(w);
       if (fc_input_weights.size() < fc_input_weights_count) {
           fc_input_weights.push_back(w);
-      } else if (fc_input_weights.size() == fc_input_weights_count && fc_input_bias.size() < hidden_size) {
+      }/* else if (fc_input_weights.size() == fc_input_weights_count && fc_input_bias.size() < hidden_size) {
           fc_input_bias.push_back(w);
       } else {
           fc_output_weights.push_back(w);
           if (fc_output_weights.size() == hidden_size) {
               fc_output_bias.push_back(w);
           }
-      }
+      }*/
   }
   m_value->mutex.unlock();
-  //std::cout << "accumulate of value weights: " << accumulate(critic.begin(),critic.end(),0.0) << std::endl;
+  /*
+  std::cout << "accumulate of value weights: " << accumulate(critic.begin(),critic.end(),0.0) << std::endl;
+  std::cout << "accumulate of value input weights: " << accumulate(fc_input_weights.begin(),fc_input_weights.end(),0.0) << std::endl;
+  std::cout << "size of value input weights: " << fc_input_weights.size() << std::endl;
   // Update critic_net weights and bias
   for (auto& p : critic_net.named_parameters()) {
       if (p.key() == "fc_input.weight") {
-          torch::Tensor new_weight_tensor = torch::from_blob(fc_input_weights.data(), {hidden_size, input_size});
+          torch::Tensor new_weight_tensor = torch::from_blob(fc_input_weights.data(), {fc_input_weights.size()});
+	  //std::cout << "new_weight_tensor sum: " << new_weight_tensor.sum() << std::endl;
           p.value().data().copy_(new_weight_tensor);
       } else if (p.key() == "fc_input.bias") {
-          torch::Tensor new_bias_tensor = torch::from_blob(fc_input_bias.data(), {hidden_size});
+          torch::Tensor new_bias_tensor = torch::from_blob(fc_input_bias.data(), {output_size});
           p.value().data().copy_(new_bias_tensor);
       } else if (p.key() == "fc_output.weight") {
           torch::Tensor new_weight_tensor = torch::from_blob(fc_output_weights.data(), {output_size, hidden_size});
@@ -167,7 +169,17 @@ void AACLoopFunction::PreStep() {
           p.value().data().copy_(new_bias_tensor);
       }
   }
-  // Load up-to-date policy network to each robot
+  auto params = critic_net.named_parameters();
+  */
+  // Update all parameters with values from the new_params vector
+  size_t index = 0;
+  for (auto& param : critic_net.parameters()) {
+	  auto param_data = torch::from_blob(critic.data() + index, param.data().sizes()).clone();
+	  param.data() = param_data;
+	  index += param_data.numel();
+  }
+
+
   std::vector<float> actor;
   //std::cout << "Reading policy global shared vector\n";
   m_policy->mutex.lock();
@@ -176,7 +188,6 @@ void AACLoopFunction::PreStep() {
   //std::cout << "size global policy: " << m_policy->vec.size() << std::endl;
   for(auto w : m_policy->vec){
     actor.push_back(w);
-    //std::cout << w << ", ";
   }
   m_policy->mutex.unlock();
   //std::cout << "accumulate of policy weights: " << accumulate(actor.begin(),actor.end(),0.0) << std::endl;
@@ -205,6 +216,7 @@ void AACLoopFunction::PreStep() {
 /****************************************/
 
 void AACLoopFunction::PostStep() {
+  //std::cout << "Poststep\n";
   at::Tensor grid = torch::zeros({50, 50});
   CSpace::TMapPerType& tEpuckMap = GetSpace().GetEntitiesByType("epuck");
   CVector2 cEpuckPosition(0,0);
@@ -246,7 +258,7 @@ void AACLoopFunction::PostStep() {
   grid[grid_x][grid_y+radius] = 3;
   grid[grid_x][grid_y-radius] = 3;
   //std::cout << "State:\n";
-  //print_grid(grid);
+  print_grid(grid);
   grid[grid_x][grid_y] = temp1;
   grid[grid_x+radius][grid_y] = temp2;
   grid[grid_x-radius][grid_y] = temp3;
@@ -262,44 +274,70 @@ void AACLoopFunction::PostStep() {
    * else 0
    */
   // Flatten the 2D tensor to 1D for net input
-  state_prime = grid.view({-1}).clone();
+  state_prime = grid.view({1, 1, 50, 50}).clone();
 
   // Compute delta with Critic predictions
-  int gamma = 1;
   torch::Tensor v_state = critic_net.forward(state);
+  v_state.retain_grad();
   torch::Tensor v_state_prime = critic_net.forward(state_prime);
   delta = reward + gamma * v_state_prime[0].item<float>() - v_state[0].item<float>();
-  /*std::cout << "v(s) = " << v_state[0].item<float>() << std::endl;
+  
+  std::cout << "v(s) = " << v_state[0].item<float>() << std::endl;
   std::cout << "v(s') = " << v_state_prime[0].item<float>() << std::endl;
   std::cout << "reward = " << reward << std::endl;
   std::cout << "delta = " << delta << std::endl;
-  */
+ 
   // Compute value trace
   // Zero out the gradients
   critic_net.zero_grad();
   // Compute the gradient by back-propagation
   v_state.backward();
 
-  auto params = critic_net.named_parameters();
-  auto fc_input_weight_grad = params["fc_input.weight"].grad();
+  // Update value trace using gradients of each parameter
+  int param_index = 0;
+  for (const auto& parameter : critic_net.parameters()) {
+	  // Get the gradient tensor of the current parameter
+	  torch::Tensor gradients = parameter.grad();
+
+	  // Get the number of elements in the gradient tensor
+	  int num_elements = gradients.numel();
+	  // Loop through each element of the gradient tensor
+	  for (int i = 0; i < num_elements; ++i) {
+		  // Access the individual element of the gradient tensor
+		  float gradient_value = gradients.view(-1)[i].item<float>();
+
+		  // Update the corresponding value_trace element using the gradient value
+		  value_trace[param_index] = lambda_critic * value_trace[param_index] + gradient_value;
+
+		  // Move to the next index in value_trace
+		  param_index++;
+	  }
+
+	  // Clear gradients for the current parameter to avoid interference with the next backward pass
+	  parameter.grad().zero_();
+  }
+  /*
+     auto params = critic_net.named_parameters();
+     auto fc_input_weight_grad = params["fc_input.weight"].grad();
   auto fc_input_bias_grad = params["fc_input.bias"].grad();
   auto fc_output_weight_grad = params["fc_output.weight"].grad();
   auto fc_output_bias_grad = params["fc_output.bias"].grad();
 
   // Flatten the gradient tensors
   fc_input_weight_grad = fc_input_weight_grad.view({-1});
-  fc_output_weight_grad = fc_output_weight_grad.view({-1});
-  fc_input_bias_grad = fc_input_bias_grad.view({-1});
-  fc_output_bias_grad = fc_output_bias_grad.view({-1});
+  //fc_output_weight_grad = fc_output_weight_grad.view({-1});
+  //fc_input_bias_grad = fc_input_bias_grad.view({-1});
+  //fc_output_bias_grad = fc_output_bias_grad.view({-1});
 
   float* fc_input_weight_data = fc_input_weight_grad.data_ptr<float>();
-  float* fc_output_weight_data = fc_output_weight_grad.data_ptr<float>();
-  float* fc_input_bias_data = fc_input_bias_grad.data_ptr<float>();
-  float* fc_output_bias_data = fc_output_bias_grad.data_ptr<float>();
+  //std::cout << "accumulate of value weights grad: " << fc_input_weight_grad.sum() << std::endl;
+  //float* fc_output_weight_data = fc_output_weight_grad.data_ptr<float>();
+  //float* fc_input_bias_data = fc_input_bias_grad.data_ptr<float>();
+  //float* fc_output_bias_data = fc_output_bias_grad.data_ptr<float>();
 
-  float lambda_critic = 0.9;
 
   // Update the value_trace based on the gradients for fc_input (weights and biases)
+  //std::cout <<" update value trace\n";
   for (int i = 0; i < input_size * hidden_size; ++i) {
       value_trace[i] = lambda_critic * value_trace[i] + fc_input_weight_data[i];
   }
@@ -314,7 +352,7 @@ void AACLoopFunction::PostStep() {
   }
 
   value_trace[input_size * hidden_size + hidden_size + hidden_size * output_size] = lambda_critic * value_trace[input_size * hidden_size + hidden_size + hidden_size * output_size] + fc_output_bias_data[0];
-
+*/
   //std::cout << "accumulate of value input weights: " << params["fc_input.weight"].sum() << std::endl;
   //std::cout << "accumulate of value output weights: " << params["fc_output.weight"].sum() << std::endl;
   //std::cout << "accumulate of value trace: " << accumulate(value_trace.begin(),value_trace.end(),0.0) << std::endl;

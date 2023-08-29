@@ -65,37 +65,41 @@ class AACLoopFunction : public CoreLoopFunctions {
 
       // Network
       int input_size = 2500;
-      int hidden_size = 6;
+      int hidden_size = 1;
       int output_size = 1;
       CRange<Real> m_cNeuralNetworkOutputRange;
-      struct Net : torch::nn::Module {
-        Net()
-        : fc_input(torch::nn::LinearOptions(2500, 6).bias(true)),
-          dropout_input(0.1),
-          fc_output(6, 1),
-          dropout_output(0.1)
-        {
-            register_module("fc_input", fc_input);
-            register_module("dropout_input", dropout_input);	  
-            register_module("fc_output", fc_output);			
-            register_module("dropout_output", dropout_output);  
-        }
+      // Define the ConvNet architecture
+      struct ConvNet : torch::nn::Module {
+	      ConvNet() {
+		      // Convolutional layers
+		      conv1 = register_module("conv1", torch::nn::Conv2d(torch::nn::Conv2dOptions(1, 16, 8).stride(4)));
+		      conv2 = register_module("conv2", torch::nn::Conv2d(torch::nn::Conv2dOptions(16, 32, 4).stride(2)));
+
+		      // Max pooling layers
+		      maxpool1 = register_module("maxpool1", torch::nn::MaxPool2d(torch::nn::MaxPool2dOptions(2)));
+		      maxpool2 = register_module("maxpool2", torch::nn::MaxPool2d(torch::nn::MaxPool2dOptions(2)));
+
+		      // Fully connected layers
+		      fc1 = register_module("fc1", torch::nn::Linear(32 * 4 * 4, 64));
+		      fc2 = register_module("fc2", torch::nn::Linear(64, 1));
+	      }
+
+	      torch::Tensor forward(torch::Tensor x) {
+		      x = torch::relu(conv1(x));
+		      x = torch::relu(conv2(x));
+		      x = x.view({x.size(0), -1}); // Flatten the tensor
+		      x = torch::relu(fc1(x));
+		      x = torch::relu(fc2(x));
+		      return x;
+	      }
 
 
-        // Implement the Net's algorithm.
-        torch::Tensor forward(torch::Tensor x) {
-          x = torch::relu(fc_input(x));
-          x = dropout_input(x);
-          x = torch::relu(fc_output(x));
-          x = dropout_output(x);
-          return x;
-        };
-
-        torch::nn::Linear fc_input, fc_output;
-        torch::nn::Dropout dropout_input, dropout_output;
+	      torch::nn::Conv2d conv1{nullptr}, conv2{nullptr};
+	      torch::nn::MaxPool2d maxpool1{nullptr}, maxpool2{nullptr};
+	      torch::nn::Linear fc1{nullptr}, fc2{nullptr};
       };
-      Net critic_net; // Each thread will have its own `Net` instance
-      
+      ConvNet critic_net; // Each thread will have its own `Net` instance
+
       // Learning variables
       float delta;
       std::vector<float> value_trace;
@@ -107,8 +111,12 @@ class AACLoopFunction : public CoreLoopFunctions {
       at::Tensor state;
       at::Tensor state_prime;
 
-      int size_value_net = (input_size * hidden_size + hidden_size) + (hidden_size * output_size + output_size);
+      int size_value_net = 42161;
       int size_policy_net = 96;
+
+
+      int gamma = 1;
+      float lambda_critic = 0.9;
 };
 
 #endif
