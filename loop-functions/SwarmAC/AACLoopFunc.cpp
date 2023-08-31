@@ -136,16 +136,6 @@ void AACLoopFunction::PreStep() {
   m_value->mutex.lock();
   for (auto w : m_value->vec) {
       critic.push_back(w);
-      if (fc_input_weights.size() < fc_input_weights_count) {
-          fc_input_weights.push_back(w);
-      }/* else if (fc_input_weights.size() == fc_input_weights_count && fc_input_bias.size() < hidden_size) {
-          fc_input_bias.push_back(w);
-      } else {
-          fc_output_weights.push_back(w);
-          if (fc_output_weights.size() == hidden_size) {
-              fc_output_bias.push_back(w);
-          }
-      }*/
   }
   m_value->mutex.unlock();
   /*
@@ -258,7 +248,7 @@ void AACLoopFunction::PostStep() {
   grid[grid_x][grid_y+radius] = 3;
   grid[grid_x][grid_y-radius] = 3;
   //std::cout << "State:\n";
-  print_grid(grid);
+  //print_grid(grid);
   grid[grid_x][grid_y] = temp1;
   grid[grid_x+radius][grid_y] = temp2;
   grid[grid_x-radius][grid_y] = temp3;
@@ -278,15 +268,14 @@ void AACLoopFunction::PostStep() {
 
   // Compute delta with Critic predictions
   torch::Tensor v_state = critic_net.forward(state);
-  v_state.retain_grad();
   torch::Tensor v_state_prime = critic_net.forward(state_prime);
   delta = reward + gamma * v_state_prime[0].item<float>() - v_state[0].item<float>();
-  
+/*  
   std::cout << "v(s) = " << v_state[0].item<float>() << std::endl;
   std::cout << "v(s') = " << v_state_prime[0].item<float>() << std::endl;
   std::cout << "reward = " << reward << std::endl;
   std::cout << "delta = " << delta << std::endl;
- 
+*/
   // Compute value trace
   // Zero out the gradients
   critic_net.zero_grad();
@@ -307,7 +296,7 @@ void AACLoopFunction::PostStep() {
 		  float gradient_value = gradients.view(-1)[i].item<float>();
 
 		  // Update the corresponding value_trace element using the gradient value
-		  value_trace[param_index] = lambda_critic * value_trace[param_index] + gradient_value;
+		  value_trace[param_index] = gamma * lambda_critic * value_trace[param_index] + gradient_value;
 
 		  // Move to the next index in value_trace
 		  param_index++;

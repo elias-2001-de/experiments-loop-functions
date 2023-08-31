@@ -72,24 +72,24 @@ class AACLoopFunction : public CoreLoopFunctions {
       struct ConvNet : torch::nn::Module {
 	      ConvNet() {
 		      // Convolutional layers
-		      conv1 = register_module("conv1", torch::nn::Conv2d(torch::nn::Conv2dOptions(1, 16, 8).stride(4)));
-		      conv2 = register_module("conv2", torch::nn::Conv2d(torch::nn::Conv2dOptions(16, 32, 4).stride(2)));
+		      conv1 = register_module("conv1", torch::nn::Conv2d(torch::nn::Conv2dOptions(1, 4, 3).stride(1)));
+		      conv2 = register_module("conv2", torch::nn::Conv2d(torch::nn::Conv2dOptions(4, 8, 3).stride(1)));
 
 		      // Max pooling layers
-		      maxpool1 = register_module("maxpool1", torch::nn::MaxPool2d(torch::nn::MaxPool2dOptions(2)));
-		      maxpool2 = register_module("maxpool2", torch::nn::MaxPool2d(torch::nn::MaxPool2dOptions(2)));
+		      maxpool1 = register_module("maxpool1", torch::nn::MaxPool2d(torch::nn::MaxPool2dOptions(3)));
+		      maxpool2 = register_module("maxpool2", torch::nn::MaxPool2d(torch::nn::MaxPool2dOptions(3)));
 
 		      // Fully connected layers
-		      fc1 = register_module("fc1", torch::nn::Linear(32 * 4 * 4, 64));
-		      fc2 = register_module("fc2", torch::nn::Linear(64, 1));
+		      fc1 = register_module("fc1", torch::nn::Linear(8 * 4 * 4, 8)); 
+		      fc2 = register_module("fc2", torch::nn::Linear(8, 1));
 	      }
 
 	      torch::Tensor forward(torch::Tensor x) {
-		      x = torch::relu(conv1(x));
-		      x = torch::relu(conv2(x));
+		      x = torch::relu(maxpool1(conv1(x)));
+		      x = torch::relu(maxpool2(conv2(x)));
 		      x = x.view({x.size(0), -1}); // Flatten the tensor
 		      x = torch::relu(fc1(x));
-		      x = torch::relu(fc2(x));
+		      x = fc2(x);
 		      return x;
 	      }
 
@@ -111,11 +111,11 @@ class AACLoopFunction : public CoreLoopFunctions {
       at::Tensor state;
       at::Tensor state_prime;
 
-      int size_value_net = 42161;
-      int size_policy_net = 96;
+      int size_value_net = 1377;
+      int size_policy_net = 178;
 
 
-      int gamma = 1;
+      int gamma = 0.9;
       float lambda_critic = 0.9;
 };
 
