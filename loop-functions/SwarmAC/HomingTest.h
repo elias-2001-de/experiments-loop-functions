@@ -7,8 +7,8 @@
   * @license MIT License
   */
 
-#ifndef HomingTest
-#define HomingTest
+#ifndef HOMING
+#define HOMING
 
 #include <torch/torch.h>
 
