@@ -6,12 +6,12 @@
   * @license MIT License
   */
 
-#include "Homing.h"
+#include "HomingTest.h"
 
 /****************************************/
 /****************************************/
 
-Homing::Homing() {
+HomingTest::HomingTest() {
   m_fRadius = 0.3;
   m_cCoordSpot1 = CVector2(0,-0.7);
   m_unScoreSpot1 = 0;
@@ -22,22 +22,22 @@ Homing::Homing() {
 /****************************************/
 /****************************************/
 
-Homing::Homing(const Homing& orig) {}
+HomingTest::HomingTest(const HomingTest& orig) {}
 
 /****************************************/
 /****************************************/
 
-Homing::~Homing() {}
+HomingTest::~HomingTest() {}
 
 /****************************************/
 /****************************************/
 
-void Homing::Destroy() {}
+void HomingTest::Destroy() {}
 
 /****************************************/
 /****************************************/
 
-argos::CColor Homing::GetFloorColor(const argos::CVector2& c_position_on_plane) {
+argos::CColor HomingTest::GetFloorColor(const argos::CVector2& c_position_on_plane) {
   CVector2 vCurrentPoint(c_position_on_plane.GetX(), c_position_on_plane.GetY());
   Real d = (m_cCoordSpot1 - vCurrentPoint).Length();
   if (d <= m_fRadius) {
@@ -51,7 +51,7 @@ argos::CColor Homing::GetFloorColor(const argos::CVector2& c_position_on_plane) 
 /****************************************/
 /****************************************/
 
-void Homing::Reset() {
+void HomingTest::Reset() {
   m_fObjectiveFunction = 0;
   m_unScoreSpot1 = 0;
 
@@ -61,7 +61,7 @@ void Homing::Reset() {
 /****************************************/
 /****************************************/
 
-void Homing::PostStep() {
+void HomingTest::PostStep() {
   at::Tensor grid = torch::zeros({50, 50});
   CSpace::TMapPerType& tEpuckMap = GetSpace().GetEntitiesByType("epuck");
   CVector2 cEpuckPosition(0,0);
@@ -110,21 +110,21 @@ void Homing::PostStep() {
 /****************************************/
 /****************************************/
 
-void Homing::PostExperiment() {
+void HomingTest::PostExperiment() {
   //LOG << "Score = " << m_fObjectiveFunction << std::endl;
 }
 
 /****************************************/
 /****************************************/
 
-Real Homing::GetObjectiveFunction() {
+Real HomingTest::GetObjectiveFunction() {
   return m_fObjectiveFunction;
 }
 
 /****************************************/
 /****************************************/
 
-CVector3 Homing::GetRandomPosition() {
+CVector3 HomingTest::GetRandomPosition() {
   Real temp, a, b, fPosX, fPosY;
   bool bPlaced = false;
   do {
@@ -150,7 +150,7 @@ CVector3 Homing::GetRandomPosition() {
 /****************************************/
 /****************************************/
 
-void Homing::print_grid(at::Tensor grid){
+void HomingTest::print_grid(at::Tensor grid){
     // Get the size of the grid tensor
     auto sizes = grid.sizes();
     int rows = sizes[0];
@@ -213,4 +213,4 @@ void Homing::print_grid(at::Tensor grid){
     std::cout << "+" << std::endl;
 }
 
-REGISTER_LOOP_FUNCTIONS(Homing, "homing_test");
+REGISTER_LOOP_FUNCTIONS(HomingTest, "homing_test");

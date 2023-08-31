@@ -7,8 +7,8 @@
   * @license MIT License
   */
 
-#ifndef HOMING
-#define HOMING
+#ifndef HomingTest
+#define HomingTest
 
 #include <torch/torch.h>
 
@@ -25,11 +25,11 @@
 
 using namespace argos;
 
-class Homing: public CoreLoopFunctions {
+class HomingTest: public CoreLoopFunctions {
   public:
-    Homing();
-    Homing(const Homing& orig);
-    virtual ~Homing();
+    HomingTest();
+    HomingTest(const HomingTest& orig);
+    virtual ~HomingTest();
 
     virtual void Destroy();
 
