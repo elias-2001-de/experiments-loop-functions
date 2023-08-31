@@ -119,7 +119,7 @@ void Homing::PreStep() {
     grid[grid_x][grid_y] = 1;
   }
   // Flatten the 2D tensor to 1D for net input
-  state = grid.view({-1}).clone();
+  state = grid.view({1, 1, 50, 50}).clone();
   state.set_requires_grad(true);
 
   // Load up-to-date value network
@@ -134,35 +134,17 @@ void Homing::PreStep() {
   m_value->mutex.lock();
   for (auto w : m_value->vec) {
       critic.push_back(w);
-      if (fc_input_weights.size() < fc_input_weights_count) {
-          fc_input_weights.push_back(w);
-      } else if (fc_input_weights.size() == fc_input_weights_count && fc_input_bias.size() < hidden_size) {
-          fc_input_bias.push_back(w);
-      } else {
-          fc_output_weights.push_back(w);
-          if (fc_output_weights.size() == hidden_size) {
-              fc_output_bias.push_back(w);
-          }
-      }
   }
   m_value->mutex.unlock();
-  //std::cout << "accumulate of value weights: " << accumulate(critic.begin(),critic.end(),0.0) << std::endl;
-  // Update critic_net weights and bias
-  for (auto& p : critic_net.named_parameters()) {
-      if (p.key() == "fc_input.weight") {
-          torch::Tensor new_weight_tensor = torch::from_blob(fc_input_weights.data(), {hidden_size, input_size});
-          p.value().data().copy_(new_weight_tensor);
-      } else if (p.key() == "fc_input.bias") {
-          torch::Tensor new_bias_tensor = torch::from_blob(fc_input_bias.data(), {hidden_size});
-          p.value().data().copy_(new_bias_tensor);
-      } else if (p.key() == "fc_output.weight") {
-          torch::Tensor new_weight_tensor = torch::from_blob(fc_output_weights.data(), {output_size, hidden_size});
-          p.value().data().copy_(new_weight_tensor);
-      } else if (p.key() == "fc_output.bias") {
-          torch::Tensor new_bias_tensor = torch::from_blob(fc_output_bias.data(), {output_size});
-          p.value().data().copy_(new_bias_tensor);
-      }
+
+  // Update all parameters with values from the new_params vector
+  size_t index = 0;
+  for (auto& param : critic_net.parameters()) {
+	  auto param_data = torch::from_blob(critic.data() + index, param.data().sizes()).clone();
+	  param.data() = param_data;
+	  index += param_data.numel();
   }
+  
   // Load up-to-date policy network to each robot
   std::vector<float> actor;
   //std::cout << "Reading policy global shared vector\n";
@@ -204,7 +186,7 @@ void Homing::PostStep() {
   at::Tensor grid = torch::zeros({50, 50});
   CSpace::TMapPerType& tEpuckMap = GetSpace().GetEntitiesByType("epuck");
   CVector2 cEpuckPosition(0,0);
-  m_unScoreSpot1 = 0;	
+  int reward = 0;
   for (CSpace::TMapPerType::iterator it = tEpuckMap.begin(); it != tEpuckMap.end(); ++it) {
     CEPuckEntity* pcEpuck = any_cast<CEPuckEntity*>(it->second);
     cEpuckPosition.Set(pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetX(),
@@ -217,7 +199,7 @@ void Homing::PostStep() {
     Real fDistanceSpot1 = (m_cCoordSpot1 - cEpuckPosition).Length();
     if (fDistanceSpot1 <= m_fRadius) {
       m_unScoreSpot1 += 1;    // Reward
-      m_fObjectiveFunction += 1;
+      reward += 1;
       //std::cout << "Robot at [" << grid_x << ";" << grid_y << "]\n";      
     }
     
@@ -259,64 +241,47 @@ void Homing::PostStep() {
    * else 0
    */
   // Flatten the 2D tensor to 1D for net input
-  state_prime = grid.view({-1}).clone();
+  state_prime = grid.view({1, 1, 50, 50}).clone();
 
   // Compute delta with Critic predictions
-  int gamma = 0.9;
   torch::Tensor v_state = critic_net.forward(state);
-  //std::cout << "v(s) = " << v_state[0].item<float>() << std::endl;
   torch::Tensor v_state_prime = critic_net.forward(state_prime);
-  //std::cout << "v(s') = " << v_state_prime[0].item<float>() << std::endl;
   delta = m_unScoreSpot1 + gamma * v_state_prime[0].item<float>() - v_state[0].item<float>();
-  //std::cout << "reward = " << m_unScoreSpot1 << std::endl;
-  //std::cout << "delta = " << delta << std::endl;
-  
+  /*  
+  std::cout << "v(s) = " << v_state[0].item<float>() << std::endl;
+  std::cout << "v(s') = " << v_state_prime[0].item<float>() << std::endl;
+  std::cout << "reward = " << reward << std::endl;
+  std::cout << "delta = " << delta << std::endl;
+*/
   // Compute value trace
   // Zero out the gradients
   critic_net.zero_grad();
   // Compute the gradient by back-propagation
   v_state.backward();
 
-  auto params = critic_net.named_parameters();
-  auto fc_input_weight_grad = params["fc_input.weight"].grad();
-  auto fc_input_bias_grad = params["fc_input.bias"].grad();
-  auto fc_output_weight_grad = params["fc_output.weight"].grad();
-  auto fc_output_bias_grad = params["fc_output.bias"].grad();
+  // Update value trace using gradients of each parameter
+  int param_index = 0;
+  for (const auto& parameter : critic_net.parameters()) {
+	  // Get the gradient tensor of the current parameter
+	  torch::Tensor gradients = parameter.grad();
 
-  // Flatten the gradient tensors
-  fc_input_weight_grad = fc_input_weight_grad.view({-1});
-  fc_output_weight_grad = fc_output_weight_grad.view({-1});
-  fc_input_bias_grad = fc_input_bias_grad.view({-1});
-  fc_output_bias_grad = fc_output_bias_grad.view({-1});
+	  // Get the number of elements in the gradient tensor
+	  int num_elements = gradients.numel();
+	  // Loop through each element of the gradient tensor
+	  for (int i = 0; i < num_elements; ++i) {
+		  // Access the individual element of the gradient tensor
+		  float gradient_value = gradients.view(-1)[i].item<float>();
 
-  float* fc_input_weight_data = fc_input_weight_grad.data_ptr<float>();
-  float* fc_output_weight_data = fc_output_weight_grad.data_ptr<float>();
-  float* fc_input_bias_data = fc_input_bias_grad.data_ptr<float>();
-  float* fc_output_bias_data = fc_output_bias_grad.data_ptr<float>();
+		  // Update the corresponding value_trace element using the gradient value
+		  value_trace[param_index] = gamma * lambda_critic * value_trace[param_index] + gradient_value;
 
-  float lambda_critic = 0.9;
+		  // Move to the next index in value_trace
+		  param_index++;
+	  }
 
-  // Update the value_trace based on the gradients for fc_input (weights and biases)
-  for (int i = 0; i < input_size * hidden_size; ++i) {
-      value_trace[i] = lambda_critic * value_trace[i] + fc_input_weight_data[i];
+	  // Clear gradients for the current parameter to avoid interference with the next backward pass
+	  parameter.grad().zero_();
   }
-
-  for (int i = input_size * hidden_size; i < (input_size * hidden_size + hidden_size); ++i) {
-      value_trace[i] = lambda_critic * value_trace[i] + fc_input_bias_data[i - input_size * hidden_size];
-  }
-
-  // Update the value_trace based on the gradients for fc_output (weights and biases)
-  for (int i = input_size * hidden_size + hidden_size; i < (input_size * hidden_size + hidden_size + hidden_size * output_size); ++i) {
-      value_trace[i] = lambda_critic * value_trace[i] + fc_output_weight_data[i - input_size * hidden_size - hidden_size];
-  }
-
-  value_trace[input_size * hidden_size + hidden_size + hidden_size * output_size] = lambda_critic * value_trace[input_size * hidden_size + hidden_size + hidden_size * output_size] + fc_output_bias_data[0];
-
-  //std::cout << "accumulate of value input weights: " << params["fc_input.weight"].sum() << std::endl;
-  //std::cout << "accumulate of value output weights: " << params["fc_output.weight"].sum() << std::endl;
-  //std::cout << "accumulate of value trace: " << accumulate(value_trace.begin(),value_trace.end(),0.0) << std::endl;
-  //std::cout << "value trace bias: " << value_trace[-1] << std::endl;
-  //std::cout <<" policy_tarce\n";
   
   CSpace::TMapPerType cEntities = GetSpace().GetEntitiesByType("controller"); 
   std::fill(policy_trace.begin(), policy_trace.end(), 0.0f); 
