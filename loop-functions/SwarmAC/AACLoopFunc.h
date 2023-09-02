@@ -111,10 +111,10 @@ class AACLoopFunction : public CoreLoopFunctions {
       at::Tensor state_prime;
 
       int size_value_net = 1377;
-      int size_policy_net = 178;
+      int size_policy_net = 96;
 
 
-      int gamma = 0.9;
+      float gamma = 0.9;
       float lambda_critic = 0.9;
 };
 

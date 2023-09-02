@@ -198,7 +198,7 @@ void Homing::PostStep() {
     
     Real fDistanceSpot1 = (m_cCoordSpot1 - cEpuckPosition).Length();
     if (fDistanceSpot1 <= m_fRadius) {
-      m_unScoreSpot1 += 1;    // Reward
+      m_fObjectiveFunction += 1;    // Reward
       reward += 1;
       //std::cout << "Robot at [" << grid_x << ";" << grid_y << "]\n";      
     }
@@ -246,13 +246,13 @@ void Homing::PostStep() {
   // Compute delta with Critic predictions
   torch::Tensor v_state = critic_net.forward(state);
   torch::Tensor v_state_prime = critic_net.forward(state_prime);
-  delta = m_unScoreSpot1 + gamma * v_state_prime[0].item<float>() - v_state[0].item<float>();
-  /*  
+  delta = reward + gamma * v_state_prime[0].item<float>() - v_state[0].item<float>();
+/*
   std::cout << "v(s) = " << v_state[0].item<float>() << std::endl;
   std::cout << "v(s') = " << v_state_prime[0].item<float>() << std::endl;
   std::cout << "reward = " << reward << std::endl;
   std::cout << "delta = " << delta << std::endl;
-*/
+  */
   // Compute value trace
   // Zero out the gradients
   critic_net.zero_grad();

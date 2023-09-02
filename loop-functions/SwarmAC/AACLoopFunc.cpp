@@ -269,13 +269,14 @@ void AACLoopFunction::PostStep() {
   // Compute delta with Critic predictions
   torch::Tensor v_state = critic_net.forward(state);
   torch::Tensor v_state_prime = critic_net.forward(state_prime);
-  delta = reward + gamma * v_state_prime[0].item<float>() - v_state[0].item<float>();
-/*  
+  delta = reward + (gamma * v_state_prime[0].item<float>()) - v_state[0].item<float>();
+ /* 
   std::cout << "v(s) = " << v_state[0].item<float>() << std::endl;
   std::cout << "v(s') = " << v_state_prime[0].item<float>() << std::endl;
+  std::cout << "gamma * v(s') = " << gamma * v_state_prime[0].item<float>() << std::endl;
   std::cout << "reward = " << reward << std::endl;
   std::cout << "delta = " << delta << std::endl;
-*/
+  */
   // Compute value trace
   // Zero out the gradients
   critic_net.zero_grad();

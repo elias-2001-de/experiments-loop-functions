@@ -8,6 +8,8 @@ add_library(swarmac_loopfunc SHARED
                           SCAaroundLoopFunc.cpp
                           Homing.h
                           Homing.cpp
+                          HomingTest.h
+                          HomingTest.cpp
                           AggregationTwoSpotsXOR2.h
                           AggregationTwoSpotsXOR2.cpp
                           AACLoopFunc.h
