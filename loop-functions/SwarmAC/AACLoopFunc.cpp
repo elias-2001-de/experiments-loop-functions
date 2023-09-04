@@ -40,6 +40,7 @@ void AACLoopFunction::Destroy() {}
 
 void AACLoopFunction::Reset() {
   m_fObjectiveFunction = 0;
+  fTimeStep = 0;
 
   delta = 0;
   policy_trace.resize(size_policy_net);
@@ -60,6 +61,8 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
      cParametersNode = GetNode(t_tree, "params");
   } catch(std::exception e) {
   }
+
+  fTimeStep = 0;
 
   m_context = zmq::context_t(1);
   m_socket_actor = zmq::socket_t(m_context, ZMQ_PUSH);
@@ -99,7 +102,7 @@ argos::CColor AACLoopFunction::GetFloorColor(const argos::CVector2& c_position_o
 /****************************************/
 
 void AACLoopFunction::PreStep() {
-  //std::cout << "Prestep\n";
+  std::cout << "Prestep\n";
   // Observe state S
   /* Check position for each agent. 
    * If robot is in cell i --> 1
@@ -123,6 +126,9 @@ void AACLoopFunction::PreStep() {
   // Flatten the 2D tensor to 1D for net input
   state = grid.view({1, 1, 50, 50}).clone();
   state.set_requires_grad(true);
+  // get current time
+  time = torch::tensor({static_cast<float>(fTimeStep) / 1200.0f}).view({1, 1});
+  time.set_requires_grad(true);
 
   // Load up-to-date value network
   std::vector<float> critic;
@@ -162,12 +168,14 @@ void AACLoopFunction::PreStep() {
   auto params = critic_net.named_parameters();
   */
   // Update all parameters with values from the new_params vector
+  std::cout << "load critic param...\n";
   size_t index = 0;
   for (auto& param : critic_net.parameters()) {
 	  auto param_data = torch::from_blob(critic.data() + index, param.data().sizes()).clone();
 	  param.data() = param_data;
 	  index += param_data.numel();
   }
+  std::cout << "critic loaded!\n";
 
 
   std::vector<float> actor;
@@ -206,7 +214,7 @@ void AACLoopFunction::PreStep() {
 /****************************************/
 
 void AACLoopFunction::PostStep() {
-  //std::cout << "Poststep\n";
+  std::cout << "Poststep\n";
   at::Tensor grid = torch::zeros({50, 50});
   CSpace::TMapPerType& tEpuckMap = GetSpace().GetEntitiesByType("epuck");
   CVector2 cEpuckPosition(0,0);
@@ -266,22 +274,33 @@ void AACLoopFunction::PostStep() {
   // Flatten the 2D tensor to 1D for net input
   state_prime = grid.view({1, 1, 50, 50}).clone();
 
+  // get current time
+  time_prime = torch::tensor({static_cast<float>(fTimeStep+1) / 1200.0f}).view({1, 1});
   // Compute delta with Critic predictions
-  torch::Tensor v_state = critic_net.forward(state);
-  torch::Tensor v_state_prime = critic_net.forward(state_prime);
+  td::cout << "forward pass\n";
+  torch::Tensor v_state = critic_net.forward(state, time);
+  torch::Tensor v_state_prime = critic_net.forward(state_prime, time_prime);
+  if(fTimeStep+1 == 1200)
+	  v_state_prime = torch::tensor({0}).view({1, 1});
   delta = reward + (gamma * v_state_prime[0].item<float>()) - v_state[0].item<float>();
- /* 
+  
+  std::cout << "TimeStep (prime) = " << fTimeStep+1 << std::endl;
+  std::cout << "time = " << time.item<float>() << std::endl;
+  std::cout << "time_prime = " << time_prime.item<float>() << std::endl;
   std::cout << "v(s) = " << v_state[0].item<float>() << std::endl;
   std::cout << "v(s') = " << v_state_prime[0].item<float>() << std::endl;
   std::cout << "gamma * v(s') = " << gamma * v_state_prime[0].item<float>() << std::endl;
   std::cout << "reward = " << reward << std::endl;
   std::cout << "delta = " << delta << std::endl;
-  */
+  std::cout << "score = " << m_fObjectiveFunction << std::endl;
+ 
   // Compute value trace
   // Zero out the gradients
   critic_net.zero_grad();
   // Compute the gradient by back-propagation
+  std::cout << "backward\n";
   v_state.backward();
+  std::cout << "finished grad comp\n";
 
   // Update value trace using gradients of each parameter
   int param_index = 0;
@@ -345,7 +364,7 @@ void AACLoopFunction::PostStep() {
 */
   //std::cout << "accumulate of value input weights: " << params["fc_input.weight"].sum() << std::endl;
   //std::cout << "accumulate of value output weights: " << params["fc_output.weight"].sum() << std::endl;
-  //std::cout << "accumulate of value trace: " << accumulate(value_trace.begin(),value_trace.end(),0.0) << std::endl;
+  std::cout << "accumulate of value trace: " << accumulate(value_trace.begin(),value_trace.end(),0.0) << std::endl;
   //std::cout << "value trace bias: " << value_trace[-1] << std::endl;
   //std::cout <<" policy_tarce\n";
   
@@ -379,12 +398,16 @@ void AACLoopFunction::PostStep() {
   message.rebuild(serialized_data.size());
   memcpy(message.data(), serialized_data.c_str(), serialized_data.size());
   m_socket_critic.send(message, zmq::send_flags::dontwait);  
+
+
+  fTimeStep += 1;
 }
 
 /****************************************/
 /****************************************/
 
 void AACLoopFunction::PostExperiment() {
+  LOG << "Time = " << fTimeStep << std::endl;
   LOG << "Score = " << m_fObjectiveFunction << std::endl;
 }
 

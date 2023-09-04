@@ -58,6 +58,9 @@ class AACLoopFunction : public CoreLoopFunctions {
 
       Real m_fObjectiveFunction;
 
+      // Get the time step
+      int fTimeStep;
+      
       zmq::context_t m_context;
       zmq::socket_t m_socket_actor;
       zmq::socket_t m_socket_critic;
@@ -71,23 +74,27 @@ class AACLoopFunction : public CoreLoopFunctions {
       struct ConvNet : torch::nn::Module {
 	      ConvNet() {
 		      // Convolutional layers
-		      conv1 = register_module("conv1", torch::nn::Conv2d(torch::nn::Conv2dOptions(1, 4, 3).stride(1)));
-		      conv2 = register_module("conv2", torch::nn::Conv2d(torch::nn::Conv2dOptions(4, 8, 3).stride(1)));
+		      conv1 = register_module("conv1", torch::nn::Conv2d(torch::nn::Conv2dOptions(1, 16, 8).stride(4)));
+		      conv2 = register_module("conv2", torch::nn::Conv2d(torch::nn::Conv2dOptions(16, 32, 4).stride(2)));
 
 		      // Max pooling layers
 		      maxpool1 = register_module("maxpool1", torch::nn::MaxPool2d(torch::nn::MaxPool2dOptions(3)));
 		      maxpool2 = register_module("maxpool2", torch::nn::MaxPool2d(torch::nn::MaxPool2dOptions(3)));
 
 		      // Fully connected layers
-		      fc1 = register_module("fc1", torch::nn::Linear(8 * 4 * 4, 8)); 
-		      fc2 = register_module("fc2", torch::nn::Linear(8, 1));
+		      fc1 = register_module("fc1", torch::nn::Linear(32 * 4 * 4 + 1, 256));
+		      fc3 = register_module("fc2", torch::nn::Linear(256, 1));
 	      }
 
-	      torch::Tensor forward(torch::Tensor x) {
-		      x = torch::relu(maxpool1(conv1(x)));
-		      x = torch::relu(maxpool2(conv2(x)));
+	      torch::Tensor forward(torch::Tensor x, torch::Tensor t) {
+		      x = torch::relu(conv1(x));
+		      x = torch::relu(conv2(x));
 		      x = x.view({x.size(0), -1}); // Flatten the tensor
-		      x = torch::relu(fc1(x));
+		      // Concatenate x and t tensors
+		      //std::cout << "x = " << x << std::endl;
+		      //std::cout << "t = " << t << std::endl;
+		      x = torch::cat({x, t}, 1);
+		      x = torch::relu((fc1(x)));
 		      x = fc2(x);
 		      return x;
 	      }
@@ -95,7 +102,7 @@ class AACLoopFunction : public CoreLoopFunctions {
 
 	      torch::nn::Conv2d conv1{nullptr}, conv2{nullptr};
 	      torch::nn::MaxPool2d maxpool1{nullptr}, maxpool2{nullptr};
-	      torch::nn::Linear fc1{nullptr}, fc2{nullptr};
+	      torch::nn::Linear fc1{nullptr}, fc2{nullptr}, fc3{nullptr};
       };
       ConvNet critic_net; // Each thread will have its own `Net` instance
 
@@ -109,13 +116,15 @@ class AACLoopFunction : public CoreLoopFunctions {
       // Vector state_prime;   // S' at step t+1
       at::Tensor state;
       at::Tensor state_prime;
+      torch::Tensor time;
+      torch::Tensor time_prime;
 
-      int size_value_net = 1377;
+      int size_value_net = 141105;
       int size_policy_net = 96;
 
 
-      float gamma = 0.9;
-      float lambda_critic = 0.9;
+      float gamma = 0.99;
+      float lambda_critic = 0.8;
 };
 
 #endif
