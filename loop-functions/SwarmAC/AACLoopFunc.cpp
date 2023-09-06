@@ -77,6 +77,7 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
   std::fill(policy_trace.begin(), policy_trace.end(), 0.0f);
   value_trace.resize(size_value_net);
   std::fill(value_trace.begin(), value_trace.end(), 0.0f);
+
 }
 
 /****************************************/
@@ -102,7 +103,7 @@ argos::CColor AACLoopFunction::GetFloorColor(const argos::CVector2& c_position_o
 /****************************************/
 
 void AACLoopFunction::PreStep() {
-  std::cout << "Prestep\n";
+  // std::cout << "Prestep\n";
   // Observe state S
   /* Check position for each agent. 
    * If robot is in cell i --> 1
@@ -168,14 +169,12 @@ void AACLoopFunction::PreStep() {
   auto params = critic_net.named_parameters();
   */
   // Update all parameters with values from the new_params vector
-  std::cout << "load critic param...\n";
   size_t index = 0;
   for (auto& param : critic_net.parameters()) {
 	  auto param_data = torch::from_blob(critic.data() + index, param.data().sizes()).clone();
 	  param.data() = param_data;
 	  index += param_data.numel();
   }
-  std::cout << "critic loaded!\n";
 
 
   std::vector<float> actor;
@@ -214,7 +213,7 @@ void AACLoopFunction::PreStep() {
 /****************************************/
 
 void AACLoopFunction::PostStep() {
-  std::cout << "Poststep\n";
+  // std::cout << "Poststep\n";
   at::Tensor grid = torch::zeros({50, 50});
   CSpace::TMapPerType& tEpuckMap = GetSpace().GetEntitiesByType("epuck");
   CVector2 cEpuckPosition(0,0);
@@ -271,17 +270,42 @@ void AACLoopFunction::PostStep() {
    * If robot is in grid --> 1
    * else 0
    */
+  auto device_type = torch::kCUDA;
+  critic_net.to(device_type);
+  auto device = critic_net.parameters()[0].device();
+  if (device.is_cuda()) {
+      std::cout << "critic_net is on the GPU." << std::endl;
+  } else {
+      std::cout << "critic_net is on the CPU." << std::endl;
+  }
+
   // Flatten the 2D tensor to 1D for net input
-  state_prime = grid.view({1, 1, 50, 50}).clone();
+  state_prime = grid.view({1, 1, 50, 50}).clone().to(device_type);
 
   // get current time
-  time_prime = torch::tensor({static_cast<float>(fTimeStep+1) / 1200.0f}).view({1, 1});
+  time_prime = torch::tensor({static_cast<float>(fTimeStep+1) / 1200.0f}).view({1, 1}).to(device_type);
   // Compute delta with Critic predictions
-  td::cout << "forward pass\n";
-  torch::Tensor v_state = critic_net.forward(state, time);
-  torch::Tensor v_state_prime = critic_net.forward(state_prime, time_prime);
+  time = time.to(device_type);
+  if (time.device().is_cuda()) {
+      std::cout << "time is on the GPU." << std::endl;
+  } else {
+      std::cout << "time is on the CPU." << std::endl;
+  }
+  state = state.to(device_type);
+  if (state.device().is_cuda()) {
+      std::cout << "state is on the GPU." << std::endl;
+  } else {
+      std::cout << "state is on the CPU." << std::endl;
+  }
+  torch::Tensor v_state;
+  std::cout << "vstate\n";
+  v_state = critic_net.forward(state, time);
+  std::cout << "vstate: " << v_state << std::endl;
+  std::cout << "vstate_prime\n";
+  torch::Tensor v_state_prime = critic_net.forward(state_prime, time_prime).to(device_type);
   if(fTimeStep+1 == 1200)
 	  v_state_prime = torch::tensor({0}).view({1, 1});
+  std::cout << "delta:\n";
   delta = reward + (gamma * v_state_prime[0].item<float>()) - v_state[0].item<float>();
   
   std::cout << "TimeStep (prime) = " << fTimeStep+1 << std::endl;
@@ -298,15 +322,13 @@ void AACLoopFunction::PostStep() {
   // Zero out the gradients
   critic_net.zero_grad();
   // Compute the gradient by back-propagation
-  std::cout << "backward\n";
   v_state.backward();
-  std::cout << "finished grad comp\n";
 
   // Update value trace using gradients of each parameter
   int param_index = 0;
   for (const auto& parameter : critic_net.parameters()) {
 	  // Get the gradient tensor of the current parameter
-	  torch::Tensor gradients = parameter.grad();
+	  torch::Tensor gradients = parameter.grad().to(at::kCUDA);
 
 	  // Get the number of elements in the gradient tensor
 	  int num_elements = gradients.numel();
@@ -325,46 +347,10 @@ void AACLoopFunction::PostStep() {
 	  // Clear gradients for the current parameter to avoid interference with the next backward pass
 	  parameter.grad().zero_();
   }
-  /*
-     auto params = critic_net.named_parameters();
-     auto fc_input_weight_grad = params["fc_input.weight"].grad();
-  auto fc_input_bias_grad = params["fc_input.bias"].grad();
-  auto fc_output_weight_grad = params["fc_output.weight"].grad();
-  auto fc_output_bias_grad = params["fc_output.bias"].grad();
 
-  // Flatten the gradient tensors
-  fc_input_weight_grad = fc_input_weight_grad.view({-1});
-  //fc_output_weight_grad = fc_output_weight_grad.view({-1});
-  //fc_input_bias_grad = fc_input_bias_grad.view({-1});
-  //fc_output_bias_grad = fc_output_bias_grad.view({-1});
-
-  float* fc_input_weight_data = fc_input_weight_grad.data_ptr<float>();
-  //std::cout << "accumulate of value weights grad: " << fc_input_weight_grad.sum() << std::endl;
-  //float* fc_output_weight_data = fc_output_weight_grad.data_ptr<float>();
-  //float* fc_input_bias_data = fc_input_bias_grad.data_ptr<float>();
-  //float* fc_output_bias_data = fc_output_bias_grad.data_ptr<float>();
-
-
-  // Update the value_trace based on the gradients for fc_input (weights and biases)
-  //std::cout <<" update value trace\n";
-  for (int i = 0; i < input_size * hidden_size; ++i) {
-      value_trace[i] = lambda_critic * value_trace[i] + fc_input_weight_data[i];
-  }
-  for (int i = input_size * hidden_size; i < (input_size * hidden_size + hidden_size); ++i) {
-      value_trace[i] = lambda_critic * value_trace[i] + fc_input_bias_data[i - input_size * hidden_size];
-  }
-
-
-  // Update the value_trace based on the gradients for fc_output (weights and biases)
-  for (int i = input_size * hidden_size + hidden_size; i < (input_size * hidden_size + hidden_size + hidden_size * output_size); ++i) {
-      value_trace[i] = lambda_critic * value_trace[i] + fc_output_weight_data[i - input_size * hidden_size - hidden_size];
-  }
-
-  value_trace[input_size * hidden_size + hidden_size + hidden_size * output_size] = lambda_critic * value_trace[input_size * hidden_size + hidden_size + hidden_size * output_size] + fc_output_bias_data[0];
-*/
   //std::cout << "accumulate of value input weights: " << params["fc_input.weight"].sum() << std::endl;
   //std::cout << "accumulate of value output weights: " << params["fc_output.weight"].sum() << std::endl;
-  std::cout << "accumulate of value trace: " << accumulate(value_trace.begin(),value_trace.end(),0.0) << std::endl;
+  //std::cout << "accumulate of value trace: " << accumulate(value_trace.begin(),value_trace.end(),0.0) << std::endl;
   //std::cout << "value trace bias: " << value_trace[-1] << std::endl;
   //std::cout <<" policy_tarce\n";
   

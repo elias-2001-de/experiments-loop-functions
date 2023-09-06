@@ -20,6 +20,8 @@
 #include "../../../AC_trainer/src/shared_mem.h"
 #include "../../../argos3-nn/src/NNController.h"
 
+#include <typeinfo>
+
 using namespace argos;
 
 class AACLoopFunction : public CoreLoopFunctions {
@@ -83,22 +85,29 @@ class AACLoopFunction : public CoreLoopFunctions {
 
 		      // Fully connected layers
 		      fc1 = register_module("fc1", torch::nn::Linear(32 * 4 * 4 + 1, 256));
-		      fc3 = register_module("fc2", torch::nn::Linear(256, 1));
+		      fc2 = register_module("fc2", torch::nn::Linear(256, 1));
 	      }
 
 	      torch::Tensor forward(torch::Tensor x, torch::Tensor t) {
+          std::cout << "x size = " << x.sizes() << std::endl;
 		      x = torch::relu(conv1(x));
+          std::cout << "conv1(x)) size = " << x.sizes() << std::endl;
 		      x = torch::relu(conv2(x));
+          std::cout << "conv2(x)) size = " << x.sizes() << std::endl;
 		      x = x.view({x.size(0), -1}); // Flatten the tensor
+          std::cout << "x.view size = " << x.sizes() << std::endl;
 		      // Concatenate x and t tensors
 		      //std::cout << "x = " << x << std::endl;
-		      //std::cout << "t = " << t << std::endl;
+		      std::cout << "t = " << t << std::endl;
 		      x = torch::cat({x, t}, 1);
-		      x = torch::relu((fc1(x)));
-		      x = fc2(x);
+          std::cout << "x.cat size = " << x.sizes() << std::endl;
+		      x = torch::relu(fc1->forward(x));
+          std::cout << "relu((fc1(x))) size = " << x.sizes() << std::endl;
+          std::cout << "fc2(x) = " << fc2->forward(x.squeeze(0)) << std::endl;
+          x = fc2->forward(x);
+          std::cout << "fc2(x) size = " << x.sizes() << std::endl;
 		      return x;
 	      }
-
 
 	      torch::nn::Conv2d conv1{nullptr}, conv2{nullptr};
 	      torch::nn::MaxPool2d maxpool1{nullptr}, maxpool2{nullptr};
@@ -125,6 +134,7 @@ class AACLoopFunction : public CoreLoopFunctions {
 
       float gamma = 0.99;
       float lambda_critic = 0.8;
+
 };
 
 #endif
