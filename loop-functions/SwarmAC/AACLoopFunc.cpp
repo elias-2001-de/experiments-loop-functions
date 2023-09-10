@@ -273,11 +273,6 @@ void AACLoopFunction::PostStep() {
   auto device_type = torch::kCUDA;
   critic_net.to(device_type);
   auto device = critic_net.parameters()[0].device();
-  if (device.is_cuda()) {
-      std::cout << "critic_net is on the GPU." << std::endl;
-  } else {
-      std::cout << "critic_net is on the CPU." << std::endl;
-  }
 
   // Flatten the 2D tensor to 1D for net input
   state_prime = grid.view({1, 1, 50, 50}).clone().to(device_type);
@@ -286,37 +281,26 @@ void AACLoopFunction::PostStep() {
   time_prime = torch::tensor({static_cast<float>(fTimeStep+1) / 1200.0f}).view({1, 1}).to(device_type);
   // Compute delta with Critic predictions
   time = time.to(device_type);
-  if (time.device().is_cuda()) {
-      std::cout << "time is on the GPU." << std::endl;
-  } else {
-      std::cout << "time is on the CPU." << std::endl;
-  }
   state = state.to(device_type);
-  if (state.device().is_cuda()) {
-      std::cout << "state is on the GPU." << std::endl;
-  } else {
-      std::cout << "state is on the CPU." << std::endl;
-  }
+
   torch::Tensor v_state;
-  std::cout << "vstate\n";
   v_state = critic_net.forward(state, time);
-  std::cout << "vstate: " << v_state << std::endl;
-  std::cout << "vstate_prime\n";
   torch::Tensor v_state_prime = critic_net.forward(state_prime, time_prime).to(device_type);
   if(fTimeStep+1 == 1200)
 	  v_state_prime = torch::tensor({0}).view({1, 1});
-  std::cout << "delta:\n";
   delta = reward + (gamma * v_state_prime[0].item<float>()) - v_state[0].item<float>();
   
-  std::cout << "TimeStep (prime) = " << fTimeStep+1 << std::endl;
-  std::cout << "time = " << time.item<float>() << std::endl;
-  std::cout << "time_prime = " << time_prime.item<float>() << std::endl;
-  std::cout << "v(s) = " << v_state[0].item<float>() << std::endl;
-  std::cout << "v(s') = " << v_state_prime[0].item<float>() << std::endl;
-  std::cout << "gamma * v(s') = " << gamma * v_state_prime[0].item<float>() << std::endl;
-  std::cout << "reward = " << reward << std::endl;
-  std::cout << "delta = " << delta << std::endl;
-  std::cout << "score = " << m_fObjectiveFunction << std::endl;
+  if(fTimeStep == 0){
+    std::cout << "TimeStep (prime) = " << fTimeStep+1 << std::endl;
+    //std::cout << "time = " << time.item<float>() << std::endl;
+    //std::cout << "time_prime = " << time_prime.item<float>() << std::endl;
+    std::cout << "v(s) = " << v_state[0].item<float>() << std::endl;
+    std::cout << "v(s') = " << v_state_prime[0].item<float>() << std::endl;
+    std::cout << "gamma * v(s') = " << gamma * v_state_prime[0].item<float>() << std::endl;
+    std::cout << "reward = " << reward << std::endl;
+    std::cout << "delta = " << delta << std::endl;
+    std::cout << "score = " << m_fObjectiveFunction << std::endl;
+  }
  
   // Compute value trace
   // Zero out the gradients
@@ -328,7 +312,7 @@ void AACLoopFunction::PostStep() {
   int param_index = 0;
   for (const auto& parameter : critic_net.parameters()) {
 	  // Get the gradient tensor of the current parameter
-	  torch::Tensor gradients = parameter.grad().to(at::kCUDA);
+	  torch::Tensor gradients = parameter.grad().to(device);
 
 	  // Get the number of elements in the gradient tensor
 	  int num_elements = gradients.numel();
@@ -408,6 +392,7 @@ Real AACLoopFunction::GetObjectiveFunction() {
 /****************************************/
 
 CVector3 AACLoopFunction::GetRandomPosition() {
+  /*
   Real temp;
   Real a = m_pcRng->Uniform(CRange<Real>(0.0f, 1.0f));
   Real  b = m_pcRng->Uniform(CRange<Real>(0.0f, 1.0f));
@@ -420,7 +405,38 @@ CVector3 AACLoopFunction::GetRandomPosition() {
   Real fPosX = b * m_fDistributionRadius * cos(2 * CRadians::PI.GetValue() * (a/b));
   Real fPosY = b * m_fDistributionRadius * sin(2 * CRadians::PI.GetValue() * (a/b));
 
+  std::cout << "CVector3(" << fPosX << "," << fPosY << ", 0)," << std::endl;
   return CVector3(fPosX, fPosY, 0);
+  */
+  // Define 20 fixed positions
+    CVector3 fixedPositions[20] = {
+      CVector3(0.8,-0.01, 0),
+      CVector3(-0.95,-0.35, 0),
+      CVector3(0.22,-0.02, 0),
+      CVector3(-0.6,-0.76, 0),
+      CVector3(-0.05,0.12, 0),
+      CVector3(0,-0.48, 0),
+      CVector3(-0.34,-0.70, 0),
+      CVector3(-0.5,-0.07, 0),
+      CVector3(0.05,0.96, 0),
+      CVector3(0.32,0.55, 0),
+      CVector3(0.40,-0.79, 0),
+      CVector3(-0.34,0.81, 0),
+      CVector3(0.75,-0.64, 0),
+      CVector3(0.63,-0.16, 0),
+      CVector3(0.64,-0.59, 0),
+      CVector3(-0.06,-0.02, 0),
+      CVector3(0.83,0.56, 0),
+      CVector3(0.26,-0.5, 0),
+      CVector3(0.92,0.35, 0),
+      CVector3(-0.54,-0.64, 0)
+    };
+
+    // Randomly choose an index between 0 and 19
+    int index = m_pcRng->Uniform(CRange<int>(0, 20));
+
+    // Return the chosen position
+    return fixedPositions[index];
 }
 
 /****************************************/

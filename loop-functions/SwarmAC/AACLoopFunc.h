@@ -89,23 +89,13 @@ class AACLoopFunction : public CoreLoopFunctions {
 	      }
 
 	      torch::Tensor forward(torch::Tensor x, torch::Tensor t) {
-          std::cout << "x size = " << x.sizes() << std::endl;
 		      x = torch::relu(conv1(x));
-          std::cout << "conv1(x)) size = " << x.sizes() << std::endl;
 		      x = torch::relu(conv2(x));
-          std::cout << "conv2(x)) size = " << x.sizes() << std::endl;
 		      x = x.view({x.size(0), -1}); // Flatten the tensor
-          std::cout << "x.view size = " << x.sizes() << std::endl;
 		      // Concatenate x and t tensors
-		      //std::cout << "x = " << x << std::endl;
-		      std::cout << "t = " << t << std::endl;
 		      x = torch::cat({x, t}, 1);
-          std::cout << "x.cat size = " << x.sizes() << std::endl;
 		      x = torch::relu(fc1->forward(x));
-          std::cout << "relu((fc1(x))) size = " << x.sizes() << std::endl;
-          std::cout << "fc2(x) = " << fc2->forward(x.squeeze(0)) << std::endl;
           x = fc2->forward(x);
-          std::cout << "fc2(x) size = " << x.sizes() << std::endl;
 		      return x;
 	      }
 
@@ -123,8 +113,8 @@ class AACLoopFunction : public CoreLoopFunctions {
       // State vectors
       // Vector state;         // S at step t (50x50 grid representation)
       // Vector state_prime;   // S' at step t+1
-      at::Tensor state;
-      at::Tensor state_prime;
+      torch::Tensor state;
+      torch::Tensor state_prime;
       torch::Tensor time;
       torch::Tensor time_prime;
 
@@ -132,7 +122,7 @@ class AACLoopFunction : public CoreLoopFunctions {
       int size_policy_net = 96;
 
 
-      float gamma = 0.99;
+      float gamma = 1;
       float lambda_critic = 0.8;
 
 };
