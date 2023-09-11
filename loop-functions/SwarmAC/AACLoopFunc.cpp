@@ -43,10 +43,21 @@ void AACLoopFunction::Reset() {
   fTimeStep = 0;
 
   delta = 0;
+
   policy_trace.resize(size_policy_net);
   std::fill(policy_trace.begin(), policy_trace.end(), 0.0f);
   value_trace.resize(size_value_net);
   std::fill(value_trace.begin(), value_trace.end(), 0.0f);
+
+  policy_update.resize(size_policy_net);
+  std::fill(policy_update.begin(), policy_update.end(), 0.0f);
+  value_update.resize(size_value_net);
+  std::fill(value_update.begin(), value_update.end(), 0.0f);
+
+  m.resize(size_policy_net);
+  std::fill(m.begin(), m.end(), 0.0f);
+  v.resize(size_value_net);
+  std::fill(v.begin(), v.end(), 0.0f);
 
   CoreLoopFunctions::Reset();
 }
@@ -71,12 +82,24 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
   m_socket_critic = zmq::socket_t(m_context, ZMQ_PUSH);
   m_socket_critic.connect("tcp://localhost:5556");
 
-  // Initialise traces and delta
+  // Initialise traces, delta and adam update
   delta = 0;
+
   policy_trace.resize(size_policy_net);
   std::fill(policy_trace.begin(), policy_trace.end(), 0.0f);
   value_trace.resize(size_value_net);
   std::fill(value_trace.begin(), value_trace.end(), 0.0f);
+  
+  policy_update.resize(size_policy_net);
+  std::fill(policy_update.begin(), policy_update.end(), 0.0f);
+  value_update.resize(size_value_net);
+  std::fill(value_update.begin(), value_update.end(), 0.0f);
+
+  // Init first and second moment for adam
+  m.resize(size_value_net);
+  std::fill(m.begin(), m.end(), 0.0f);
+  v.resize(size_value_net);
+  std::fill(v.begin(), v.end(), 0.0f);
 
 }
 
@@ -94,7 +117,6 @@ argos::CColor AACLoopFunction::GetFloorColor(const argos::CVector2& c_position_o
   if (d <= m_fRadius) {
     return CColor::WHITE;
   }
-
 
   return CColor::GRAY50;
 }
@@ -134,40 +156,13 @@ void AACLoopFunction::PreStep() {
   // Load up-to-date value network
   std::vector<float> critic;
   std::vector<float> fc_input_weights;
-  //std::vector<float> fc_input_bias;
-  //std::vector<float> fc_output_weights;
-  //std::vector<float> fc_output_bias;
 
-  const int fc_input_weights_count = input_size * hidden_size;  // input_features * output_features
-  
   m_value->mutex.lock();
   for (auto w : m_value->vec) {
       critic.push_back(w);
   }
   m_value->mutex.unlock();
-  /*
-  std::cout << "accumulate of value weights: " << accumulate(critic.begin(),critic.end(),0.0) << std::endl;
-  std::cout << "accumulate of value input weights: " << accumulate(fc_input_weights.begin(),fc_input_weights.end(),0.0) << std::endl;
-  std::cout << "size of value input weights: " << fc_input_weights.size() << std::endl;
-  // Update critic_net weights and bias
-  for (auto& p : critic_net.named_parameters()) {
-      if (p.key() == "fc_input.weight") {
-          torch::Tensor new_weight_tensor = torch::from_blob(fc_input_weights.data(), {fc_input_weights.size()});
-	  //std::cout << "new_weight_tensor sum: " << new_weight_tensor.sum() << std::endl;
-          p.value().data().copy_(new_weight_tensor);
-      } else if (p.key() == "fc_input.bias") {
-          torch::Tensor new_bias_tensor = torch::from_blob(fc_input_bias.data(), {output_size});
-          p.value().data().copy_(new_bias_tensor);
-      } else if (p.key() == "fc_output.weight") {
-          torch::Tensor new_weight_tensor = torch::from_blob(fc_output_weights.data(), {output_size, hidden_size});
-          p.value().data().copy_(new_weight_tensor);
-      } else if (p.key() == "fc_output.bias") {
-          torch::Tensor new_bias_tensor = torch::from_blob(fc_output_bias.data(), {output_size});
-          p.value().data().copy_(new_bias_tensor);
-      }
-  }
-  auto params = critic_net.named_parameters();
-  */
+  
   // Update all parameters with values from the new_params vector
   size_t index = 0;
   for (auto& param : critic_net.parameters()) {
@@ -178,7 +173,6 @@ void AACLoopFunction::PreStep() {
 
 
   std::vector<float> actor;
-  //std::cout << "Reading policy global shared vector\n";
   m_policy->mutex.lock();
   // 96 weights (24 * 4) + 4 bias for Dandelion
   // 288 weights (24 * 12) + 6 bias for Daisy
@@ -272,19 +266,18 @@ void AACLoopFunction::PostStep() {
    */
   auto device_type = torch::kCUDA;
   critic_net.to(device_type);
-  auto device = critic_net.parameters()[0].device();
 
   // Flatten the 2D tensor to 1D for net input
   state_prime = grid.view({1, 1, 50, 50}).clone().to(device_type);
 
   // get current time
   time_prime = torch::tensor({static_cast<float>(fTimeStep+1) / 1200.0f}).view({1, 1}).to(device_type);
+
   // Compute delta with Critic predictions
   time = time.to(device_type);
   state = state.to(device_type);
 
-  torch::Tensor v_state;
-  v_state = critic_net.forward(state, time);
+  torch::Tensor v_state = critic_net.forward(state, time).to(device_type);
   torch::Tensor v_state_prime = critic_net.forward(state_prime, time_prime).to(device_type);
   if(fTimeStep+1 == 1200)
 	  v_state_prime = torch::tensor({0}).view({1, 1});
@@ -312,7 +305,7 @@ void AACLoopFunction::PostStep() {
   int param_index = 0;
   for (const auto& parameter : critic_net.parameters()) {
 	  // Get the gradient tensor of the current parameter
-	  torch::Tensor gradients = parameter.grad().to(device);
+	  torch::Tensor gradients = parameter.grad().to(device_type);
 
 	  // Get the number of elements in the gradient tensor
 	  int num_elements = gradients.numel();
@@ -323,6 +316,17 @@ void AACLoopFunction::PostStep() {
 
 		  // Update the corresponding value_trace element using the gradient value
 		  value_trace[param_index] = gamma * lambda_critic * value_trace[param_index] + gradient_value;
+
+      // Update moments for Adam
+      m[param_index] = beta1 * m[param_index] + (1.0 - beta1) * value_trace[param_index];
+      v[param_index] = beta2 * v[param_index] + (1.0 - beta2) * value_trace[param_index] * value_trace[param_index];
+
+      // Correct bias in moments
+      float m_hat = m[param_index] / (1.0 - std::pow(beta1, fTimeStep));
+      float v_hat = v[param_index] / (1.0 - std::pow(beta2, fTimeStep));
+
+      // Use moments to update parameters
+      value_trace[param_index] = m_hat / (std::sqrt(v_hat) + epsilon);
 
 		  // Move to the next index in value_trace
 		  param_index++;
@@ -339,7 +343,7 @@ void AACLoopFunction::PostStep() {
   //std::cout <<" policy_tarce\n";
   
   CSpace::TMapPerType cEntities = GetSpace().GetEntitiesByType("controller"); 
-  std::fill(policy_trace.begin(), policy_trace.end(), 0.0f); 
+  std::fill(policy_update.begin(), policy_update.end(), 0.0f); 
   for (CSpace::TMapPerType::iterator it = cEntities.begin();
 		  it != cEntities.end(); ++it) {
 	  CControllableEntity *pcEntity =
@@ -347,9 +351,9 @@ void AACLoopFunction::PostStep() {
 	  try {
 		  CEpuckNNController& cController =
 			  dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
-		  std::vector<float> trace = cController.GetPolicyEligibilityTrace();
+		  std::vector<float> update = cController.GetPolicyEligibilityTrace();
 		  for (int i = 0; i < size_policy_net; ++i) {			            
-			  policy_trace[i] += trace[i];			
+			  policy_update[i] += update[i];			
     		  }
 	  } catch (std::exception &ex) {
 		  LOGERR << "Error while updating policy trace: " << ex.what() << std::endl;
@@ -357,13 +361,13 @@ void AACLoopFunction::PostStep() {
   }
   //std::cout << "accumulate swarm policy trace: " << accumulate(policy_trace.begin(),policy_trace.end(),0.0) << std::endl;
   // actor
-  Data policy_data {delta, policy_trace};   
+  Data policy_data {delta, policy_trace, policy_update};   
   std::string serialized_data = serialize(policy_data);
   zmq::message_t message(serialized_data.size());
   memcpy(message.data(), serialized_data.c_str(), serialized_data.size());
   m_socket_actor.send(message, zmq::send_flags::dontwait);
   // critic
-  Data value_data {delta, value_trace};   
+  Data value_data {delta, value_trace, value_update};   
   serialized_data = serialize(value_data);
   message.rebuild(serialized_data.size());
   memcpy(message.data(), serialized_data.c_str(), serialized_data.size());

@@ -109,6 +109,8 @@ class AACLoopFunction : public CoreLoopFunctions {
       float delta;
       std::vector<float> value_trace;
       std::vector<float> policy_trace;
+      std::vector<float> value_update;
+      std::vector<float> policy_update;
 
       // State vectors
       // Vector state;         // S at step t (50x50 grid representation)
@@ -124,6 +126,14 @@ class AACLoopFunction : public CoreLoopFunctions {
 
       float gamma = 1;
       float lambda_critic = 0.8;
+
+
+      // adam param
+      float beta1 = 0.9;   // Exponential decay rate for first moment estimate
+      float beta2 = 0.999; // Exponential decay rate for second moment estimate
+      float epsilon = 1e-8;
+      std::vector<float> m;
+      std::vector<float> v;
 
 };
 
