@@ -94,7 +94,6 @@ class CoreLoopFunctions: public CLoopFunctions {
     // Define your data structure
     struct Data {
       float delta;
-      std::vector<float> trace;
       std::vector<float> update;
     };
 
@@ -102,8 +101,6 @@ class CoreLoopFunctions: public CLoopFunctions {
     std::string serialize(const Data& data) {
         std::stringstream ss;
         ss << data.delta;
-        ss << "\n";
-        std::copy(data.trace.begin(), data.trace.end(), std::ostream_iterator<float>(ss, " "));
         ss << "\n";
         std::copy(data.update.begin(), data.update.end(), std::ostream_iterator<float>(ss, " "));
         return ss.str();

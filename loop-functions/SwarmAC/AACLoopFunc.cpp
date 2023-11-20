@@ -14,9 +14,9 @@
 /****************************************/
 
 AACLoopFunction::AACLoopFunction() {
-  m_fRadius = 0.3;
+  m_fRadius = 0.6;
   m_cCoordBlackSpot = CVector2(0,-0.6);
-  m_cCoordWhiteSpot = CVector2(0,0.6);
+  //m_cCoordWhiteSpot = CVector2(0,0.6);
   m_fObjectiveFunction = 0;
 }
 
@@ -54,9 +54,11 @@ void AACLoopFunction::Reset() {
   value_update.resize(size_value_net);
   std::fill(value_update.begin(), value_update.end(), 0.0f);
 
-  m.resize(size_policy_net);
+  m.resize(size_value_net);
   std::fill(m.begin(), m.end(), 0.0f);
   v.resize(size_value_net);
+  std::fill(v.begin(), v.end(), 0.0f);
+  v_max.resize(size_value_net);
   std::fill(v.begin(), v.end(), 0.0f);
 
   CoreLoopFunctions::Reset();
@@ -95,10 +97,12 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
   value_update.resize(size_value_net);
   std::fill(value_update.begin(), value_update.end(), 0.0f);
 
-  // Init first and second moment for adam
+  // Init first and second moment for adam amsgrad
   m.resize(size_value_net);
   std::fill(m.begin(), m.end(), 0.0f);
   v.resize(size_value_net);
+  std::fill(v.begin(), v.end(), 0.0f);
+  v_max.resize(size_value_net);
   std::fill(v.begin(), v.end(), 0.0f);
 
 }
@@ -125,13 +129,14 @@ argos::CColor AACLoopFunction::GetFloorColor(const argos::CVector2& c_position_o
 /****************************************/
 
 void AACLoopFunction::PreStep() {
-  // std::cout << "Prestep\n";
+  std::cout << "Prestep\n";
   // Observe state S
   /* Check position for each agent. 
    * If robot is in cell i --> 1
    * else 0
    */
   at::Tensor grid = torch::zeros({50, 50});
+  torch::Tensor pos = torch::empty({2});
   CSpace::TMapPerType& tEpuckMap = GetSpace().GetEntitiesByType("epuck");
   CVector2 cEpuckPosition(0,0);
   for (CSpace::TMapPerType::iterator it = tEpuckMap.begin(); it != tEpuckMap.end(); ++it) {
@@ -145,13 +150,19 @@ void AACLoopFunction::PreStep() {
 
     // Set the grid cell that corresponds to the epuck's position to 1
     grid[grid_x][grid_y] = 1;
+
+    // PART1: State is the position of the single agent
+    pos = pos.index_put_({0}, grid_x);
+    pos = pos.index_put_({1}, grid_y);
   }
+
+  state = pos.clone();
   // Flatten the 2D tensor to 1D for net input
-  state = grid.view({1, 1, 50, 50}).clone();
-  state.set_requires_grad(true);
+  //state = grid.view({1, 1, 50, 50}).clone();
+
   // get current time
-  time = torch::tensor({static_cast<float>(fTimeStep) / 1200.0f}).view({1, 1});
-  time.set_requires_grad(true);
+  //time = torch::tensor({static_cast<float>(fTimeStep)}).view({1, 1});
+  //time.set_requires_grad(true);
 
   // Load up-to-date value network
   std::vector<float> critic;
@@ -162,7 +173,7 @@ void AACLoopFunction::PreStep() {
       critic.push_back(w);
   }
   m_value->mutex.unlock();
-  
+
   // Update all parameters with values from the new_params vector
   size_t index = 0;
   for (auto& param : critic_net.parameters()) {
@@ -170,7 +181,6 @@ void AACLoopFunction::PreStep() {
 	  param.data() = param_data;
 	  index += param_data.numel();
   }
-
 
   std::vector<float> actor;
   m_policy->mutex.lock();
@@ -181,9 +191,8 @@ void AACLoopFunction::PreStep() {
     actor.push_back(w);
   }
   m_policy->mutex.unlock();
-  //std::cout << "accumulate of policy weights: " << accumulate(actor.begin(),actor.end(),0.0) << std::endl;
-  //std::cout <<" actor\n";
-  //std::cout << "global policy size: " << actor.size() << std::endl;
+  // std::cout << "accumulate of policy weights: " << accumulate(actor.begin(),actor.end(),0.0) << std::endl;
+  // std::cout << "global policy size: " << actor.size() << std::endl;
    
   // Launch the experiment with the correct random seed and network,
   // and evaluate the average fitness
@@ -196,7 +205,7 @@ void AACLoopFunction::PreStep() {
       CEpuckNNController& cController =
       dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
       //std::cout << "LOADNET\n";
-      cController.LoadNetwork(actor);
+      cController.LoadNetwork(actor, state);
     } catch (std::exception &ex) {
       LOGERR << "Error while setting network: " << ex.what() << std::endl;
     }
@@ -207,8 +216,9 @@ void AACLoopFunction::PreStep() {
 /****************************************/
 
 void AACLoopFunction::PostStep() {
-  // std::cout << "Poststep\n";
+  std::cout << "Poststep\n";
   at::Tensor grid = torch::zeros({50, 50});
+  torch::Tensor pos = torch::empty({2});
   CSpace::TMapPerType& tEpuckMap = GetSpace().GetEntitiesByType("epuck");
   CVector2 cEpuckPosition(0,0);
   int reward = 0;
@@ -229,10 +239,13 @@ void AACLoopFunction::PostStep() {
 
     // Set the grid cell that corresponds to the epuck's position to 1
     grid[grid_x][grid_y] = 1;
-  }
 
-  //if(m_unScoreSpot1 > 0){
-  //std::cout << "score: " << m_unScoreSpot1 << std::endl;	  
+    pos = pos.index_put_({0}, grid_x);
+    pos = pos.index_put_({1}, grid_y);
+  }
+  state_prime = pos.clone();
+
+  // std::cout << "score: " << m_fObjectiveFunction << std::endl;	  
   // place spot in grid
   int grid_x = static_cast<int>(std::round((m_cCoordBlackSpot.GetX() + 1.231) / 2.462 * 49));
   int grid_y = static_cast<int>(std::round((-m_cCoordBlackSpot.GetY() + 1.231) / 2.462 * 49));
@@ -248,8 +261,8 @@ void AACLoopFunction::PostStep() {
   grid[grid_x-radius][grid_y] = 3;
   grid[grid_x][grid_y+radius] = 3;
   grid[grid_x][grid_y-radius] = 3;
-  //std::cout << "State:\n";
-  //print_grid(grid);
+  // std::cout << "GRID State:\n";
+  print_grid(grid);
   grid[grid_x][grid_y] = temp1;
   grid[grid_x+radius][grid_y] = temp2;
   grid[grid_x-radius][grid_y] = temp3;
@@ -264,29 +277,29 @@ void AACLoopFunction::PostStep() {
    * If robot is in grid --> 1
    * else 0
    */
-  auto device_type = torch::kCUDA;
+  auto device_type = torch::kCPU;
   critic_net.to(device_type);
 
   // Flatten the 2D tensor to 1D for net input
-  state_prime = grid.view({1, 1, 50, 50}).clone().to(device_type);
+  //state_prime = grid.view({1, 1, 50, 50}).clone().to(device_type);
 
   // get current time
-  time_prime = torch::tensor({static_cast<float>(fTimeStep+1) / 1200.0f}).view({1, 1}).to(device_type);
+  //time_prime = torch::tensor({static_cast<float>(fTimeStep+1)}).view({1, 1}).to(device_type);
 
   // Compute delta with Critic predictions
-  time = time.to(device_type);
+  //time = time.to(device_type);
   state = state.to(device_type);
-
-  torch::Tensor v_state = critic_net.forward(state, time).to(device_type);
-  torch::Tensor v_state_prime = critic_net.forward(state_prime, time_prime).to(device_type);
+  state.set_requires_grad(true);
+  state_prime = state_prime.to(device_type);
+  torch::Tensor v_state = critic_net.forward(state).to(device_type);
+  torch::Tensor v_state_prime = critic_net.forward(state_prime).to(device_type);
   if(fTimeStep+1 == 1200)
 	  v_state_prime = torch::tensor({0}).view({1, 1});
   delta = reward + (gamma * v_state_prime[0].item<float>()) - v_state[0].item<float>();
   
-  if(fTimeStep == 0){
+  if(fTimeStep >= 0){
     std::cout << "TimeStep (prime) = " << fTimeStep+1 << std::endl;
-    //std::cout << "time = " << time.item<float>() << std::endl;
-    //std::cout << "time_prime = " << time_prime.item<float>() << std::endl;
+    // std::cout << "state = " << state << std::endl;
     std::cout << "v(s) = " << v_state[0].item<float>() << std::endl;
     std::cout << "v(s') = " << v_state_prime[0].item<float>() << std::endl;
     std::cout << "gamma * v(s') = " << gamma * v_state_prime[0].item<float>() << std::endl;
@@ -296,52 +309,64 @@ void AACLoopFunction::PostStep() {
   }
  
   // Compute value trace
+  v_state.to(device_type);
+  v_state.requires_grad_(true);
   // Zero out the gradients
   critic_net.zero_grad();
   // Compute the gradient by back-propagation
+  //critic_net.print_last_layer_params();
+  std::cout << "v_state = " << v_state << std::endl;
   v_state.backward();
-
   // Update value trace using gradients of each parameter
   int param_index = 0;
   for (const auto& parameter : critic_net.parameters()) {
-	  // Get the gradient tensor of the current parameter
-	  torch::Tensor gradients = parameter.grad().to(device_type);
+    // Get the gradient tensor of the current parameter
+    torch::Tensor gradients = parameter.grad().to(device_type);
 
-	  // Get the number of elements in the gradient tensor
-	  int num_elements = gradients.numel();
-	  // Loop through each element of the gradient tensor
-	  for (int i = 0; i < num_elements; ++i) {
-		  // Access the individual element of the gradient tensor
-		  float gradient_value = gradients.view(-1)[i].item<float>();
+    // Get the number of elements in the gradient tensor
+    int num_elements = gradients.numel();
+    // Loop through each element of the gradient tensor
+    for (int i = 0; i < num_elements; ++i) {
+        // Access the individual element of the gradient tensor
+        float gradient_value = gradients.view(-1)[i].item<float>();
 
-		  // Update the corresponding value_trace element using the gradient value
-		  value_trace[param_index] = gamma * lambda_critic * value_trace[param_index] + gradient_value;
+        // Update the corresponding value_trace element using the gradient value
+        value_trace[param_index] = gamma * lambda_critic * value_trace[param_index] + gradient_value;
 
-      // Update moments for Adam
-      m[param_index] = beta1 * m[param_index] + (1.0 - beta1) * value_trace[param_index];
-      v[param_index] = beta2 * v[param_index] + (1.0 - beta2) * value_trace[param_index] * value_trace[param_index];
+        // // Update moments for Adam
+        // m[param_index] = beta1 * m[param_index] + (1.0 - beta1) * value_trace[param_index];
+        // v[param_index] = beta2 * v[param_index] + (1.0 - beta2) * value_trace[param_index] * value_trace[param_index];
 
-      // Correct bias in moments
-      float m_hat = m[param_index] / (1.0 - std::pow(beta1, fTimeStep));
-      float v_hat = v[param_index] / (1.0 - std::pow(beta2, fTimeStep));
+        // // AMSGRAD modification: Update v_max
+        // if (fTimeStep == 0 || v_max[param_index] < v[param_index]) {
+        //     v_max[param_index] = v[param_index];
+        // }
 
-      // Use moments to update parameters
-      value_trace[param_index] = m_hat / (std::sqrt(v_hat) + epsilon);
+        // // Correct bias in moments
+        // float m_hat = m[param_index] / (1.0 - std::pow(beta1, fTimeStep + 1));
 
-		  // Move to the next index in value_trace
-		  param_index++;
-	  }
+        // // AMSGRAD modification: Use v_max for bias-corrected denominator instead of v
+        // float v_hat = v_max[param_index] / (1.0 - std::pow(beta2, fTimeStep + 1));
+
+        // // Use moments to update parameters
+        // value_update[param_index] = lr * (m_hat / (std::sqrt(v_hat) + epsilon));
+
+        // Apply weight decay
+        //value_update[param_index] += weight_decay * parameter.view(-1)[i].item<float>();
+
+        // Apply learning rate
+        //value_update[param_index] *= lr;
+
+        // Move to the next index in value_trace
+        param_index++;
+    }
 
 	  // Clear gradients for the current parameter to avoid interference with the next backward pass
 	  parameter.grad().zero_();
   }
 
-  //std::cout << "accumulate of value input weights: " << params["fc_input.weight"].sum() << std::endl;
-  //std::cout << "accumulate of value output weights: " << params["fc_output.weight"].sum() << std::endl;
-  //std::cout << "accumulate of value trace: " << accumulate(value_trace.begin(),value_trace.end(),0.0) << std::endl;
-  //std::cout << "value trace bias: " << value_trace[-1] << std::endl;
-  //std::cout <<" policy_tarce\n";
-  
+  std::cout << "accumulate of value trace: " << accumulate(value_trace.begin(),value_trace.end(),0.0) << std::endl;
+  std::cout << "value trace bias: " << value_trace[-1] << std::endl;
   CSpace::TMapPerType cEntities = GetSpace().GetEntitiesByType("controller"); 
   std::fill(policy_update.begin(), policy_update.end(), 0.0f); 
   for (CSpace::TMapPerType::iterator it = cEntities.begin();
@@ -361,20 +386,19 @@ void AACLoopFunction::PostStep() {
   }
   //std::cout << "accumulate swarm policy trace: " << accumulate(policy_trace.begin(),policy_trace.end(),0.0) << std::endl;
   // actor
-  Data policy_data {delta, policy_trace, policy_update};   
+  Data policy_data {delta, policy_update};   
   std::string serialized_data = serialize(policy_data);
   zmq::message_t message(serialized_data.size());
   memcpy(message.data(), serialized_data.c_str(), serialized_data.size());
   m_socket_actor.send(message, zmq::send_flags::dontwait);
   // critic
-  Data value_data {delta, value_trace, value_update};   
+  Data value_data {delta, value_update};   
   serialized_data = serialize(value_data);
   message.rebuild(serialized_data.size());
   memcpy(message.data(), serialized_data.c_str(), serialized_data.size());
   m_socket_critic.send(message, zmq::send_flags::dontwait);  
-
-
   fTimeStep += 1;
+  std::cout << "Poststep over\n";
 }
 
 /****************************************/

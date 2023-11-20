@@ -70,36 +70,29 @@ class Homing: public CoreLoopFunctions {
     int output_size = 1;
     CRange<Real> m_cNeuralNetworkOutputRange;
     // Define the ConvNet architecture
-    struct ConvNet : torch::nn::Module {
-      ConvNet() {
-        // Convolutional layers
-        conv1 = register_module("conv1", torch::nn::Conv2d(torch::nn::Conv2dOptions(1, 4, 3).stride(1)));
-        conv2 = register_module("conv2", torch::nn::Conv2d(torch::nn::Conv2dOptions(4, 8, 3).stride(1)));
+      struct Net : torch::nn::Module {
+      Net(int64_t input_dim = 2, int64_t hidden_dim = 64, int64_t output_dim = 1)
+        {
+          // Define the neural network layers in a Sequential module
+          layers = torch::nn::Sequential(
+            torch::nn::Linear(input_dim, hidden_dim),
+            torch::nn::ELU(),
+            torch::nn::Linear(hidden_dim, hidden_dim),
+            torch::nn::ELU(),
+            torch::nn::Linear(hidden_dim, hidden_dim),
+            torch::nn::ELU(),
+            torch::nn::Linear(hidden_dim, output_dim)
+          );
+        }
 
-        // Max pooling layers
-        maxpool1 = register_module("maxpool1", torch::nn::MaxPool2d(torch::nn::MaxPool2dOptions(3)));
-        maxpool2 = register_module("maxpool2", torch::nn::MaxPool2d(torch::nn::MaxPool2dOptions(3)));
+        torch::Tensor forward(torch::Tensor x) {
+          return layers->forward(x);
+        }
 
-        // Fully connected layers
-        fc1 = register_module("fc1", torch::nn::Linear(8 * 4 * 4, 8)); 
-        fc2 = register_module("fc2", torch::nn::Linear(8, 1));
-      }
-
-      torch::Tensor forward(torch::Tensor x) {
-        x = torch::relu(maxpool1(conv1(x)));
-        x = torch::relu(maxpool2(conv2(x)));
-        x = x.view({x.size(0), -1}); // Flatten the tensor
-        x = torch::relu(fc1(x));
-        x = fc2(x);
-        return x;
-      }
-
-
-      torch::nn::Conv2d conv1{nullptr}, conv2{nullptr};
-      torch::nn::MaxPool2d maxpool1{nullptr}, maxpool2{nullptr};
-      torch::nn::Linear fc1{nullptr}, fc2{nullptr};
-    };
-    ConvNet critic_net; // Each thread will have its own `Net` instance
+        // Sequential container for the layers
+        torch::nn::Sequential layers;
+      };
+      Net critic_net; // Each thread will have its own `Net` instance
 
     // Learning variables
     float delta;
@@ -112,12 +105,12 @@ class Homing: public CoreLoopFunctions {
     at::Tensor state;
     at::Tensor state_prime;
 
-    int size_value_net = 1377;
-    int size_policy_net = 178;
+    int size_value_net = 8577;
+    int size_policy_net = 8772;
 
 
-    int gamma = 0.9;
-    float lambda_critic = 0.9;
+    int gamma = 0.99;
+    float lambda_critic = 0;
 };
 
 #endif

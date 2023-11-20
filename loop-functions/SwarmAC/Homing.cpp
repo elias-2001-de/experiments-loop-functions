@@ -163,6 +163,7 @@ void Homing::PreStep() {
    
   // Launch the experiment with the correct random seed and network,
   // and evaluate the average fitness
+  torch::Tensor state = torch::empty({2});
   CSpace::TMapPerType cEntities = GetSpace().GetEntitiesByType("controller");
   for (CSpace::TMapPerType::iterator it = cEntities.begin();
        it != cEntities.end(); ++it) {
@@ -172,7 +173,7 @@ void Homing::PreStep() {
       CEpuckNNController& cController =
       dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
       //std::cout << "LOADNET\n";
-      cController.LoadNetwork(actor);
+      cController.LoadNetwork(actor, state);
     } catch (std::exception &ex) {
       LOGERR << "Error while setting network: " << ex.what() << std::endl;
     }

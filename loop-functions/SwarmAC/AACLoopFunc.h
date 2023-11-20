@@ -60,6 +60,8 @@ class AACLoopFunction : public CoreLoopFunctions {
 
       Real m_fObjectiveFunction;
 
+      CSpace::TMapPerType tEpuckMap;
+
       // Get the time step
       int fTimeStep;
       
@@ -68,42 +70,37 @@ class AACLoopFunction : public CoreLoopFunctions {
       zmq::socket_t m_socket_critic;
 
       // Network
-      int input_size = 2500;
-      int hidden_size = 1;
+      int input_size = 2;
+      int hidden_size = 64;
       int output_size = 1;
       CRange<Real> m_cNeuralNetworkOutputRange;
       // Define the ConvNet architecture
-      struct ConvNet : torch::nn::Module {
-	      ConvNet() {
-		      // Convolutional layers
-		      conv1 = register_module("conv1", torch::nn::Conv2d(torch::nn::Conv2dOptions(1, 16, 8).stride(4)));
-		      conv2 = register_module("conv2", torch::nn::Conv2d(torch::nn::Conv2dOptions(16, 32, 4).stride(2)));
+      struct Net : torch::nn::Module {  
+        Net(int64_t input_dim = 2, int64_t hidden_dim = 64, int64_t output_dim = 1){
+          // Define the neural network layers in a Sequential module
+          fc1 = register_module("fc1", torch::nn::Linear(input_dim, hidden_dim));
+          fc2 = register_module("fc2", torch::nn::Linear(hidden_dim, hidden_dim));
+          fc3 = register_module("fc3", torch::nn::Linear(hidden_dim, hidden_dim));
+          fc4 = register_module("fc4", torch::nn::Linear(hidden_dim, output_dim));
+        }
 
-		      // Max pooling layers
-		      maxpool1 = register_module("maxpool1", torch::nn::MaxPool2d(torch::nn::MaxPool2dOptions(3)));
-		      maxpool2 = register_module("maxpool2", torch::nn::MaxPool2d(torch::nn::MaxPool2dOptions(3)));
+        torch::Tensor forward(torch::Tensor x) {
+          x = torch::relu(fc1->forward(x));
+          x = torch::relu(fc2->forward(x));
+          x = torch::relu(fc3->forward(x));
+          x = fc4->forward(x);
+          return x;
+        }
 
-		      // Fully connected layers
-		      fc1 = register_module("fc1", torch::nn::Linear(32 * 4 * 4 + 1, 256));
-		      fc2 = register_module("fc2", torch::nn::Linear(256, 1));
-	      }
+        void print_last_layer_params() {
+          std::cout << "Weights of last layer critic:\n" << fc4->weight << std::endl;
+          std::cout << "Bias of last layer critic:\n" << fc4->bias << std::endl;
+        }
 
-	      torch::Tensor forward(torch::Tensor x, torch::Tensor t) {
-		      x = torch::relu(conv1(x));
-		      x = torch::relu(conv2(x));
-		      x = x.view({x.size(0), -1}); // Flatten the tensor
-		      // Concatenate x and t tensors
-		      x = torch::cat({x, t}, 1);
-		      x = torch::relu(fc1->forward(x));
-          x = fc2->forward(x);
-		      return x;
-	      }
-
-	      torch::nn::Conv2d conv1{nullptr}, conv2{nullptr};
-	      torch::nn::MaxPool2d maxpool1{nullptr}, maxpool2{nullptr};
-	      torch::nn::Linear fc1{nullptr}, fc2{nullptr}, fc3{nullptr};
+        //torch::nn::Sequential layers;
+        torch::nn::Linear fc1{nullptr}, fc2{nullptr}, fc3{nullptr}, fc4{nullptr};
       };
-      ConvNet critic_net; // Each thread will have its own `Net` instance
+      Net critic_net; // Each thread will have its own `Net` instance
 
       // Learning variables
       float delta;
@@ -115,16 +112,16 @@ class AACLoopFunction : public CoreLoopFunctions {
       // State vectors
       // Vector state;         // S at step t (50x50 grid representation)
       // Vector state_prime;   // S' at step t+1
-      torch::Tensor state;
-      torch::Tensor state_prime;
-      torch::Tensor time;
-      torch::Tensor time_prime;
+      torch::Tensor state = torch::empty({2});
+      torch::Tensor state_prime = torch::empty({2});
+      // torch::Tensor time;
+      // torch::Tensor time_prime;
 
-      int size_value_net = 141105;
-      int size_policy_net = 96;
+      int size_value_net = 8577;
+      int size_policy_net = 8772;
 
 
-      float gamma = 1;
+      float gamma = 0.99;
       float lambda_critic = 0.8;
 
 
@@ -132,8 +129,14 @@ class AACLoopFunction : public CoreLoopFunctions {
       float beta1 = 0.9;   // Exponential decay rate for first moment estimate
       float beta2 = 0.999; // Exponential decay rate for second moment estimate
       float epsilon = 1e-8;
+      float weight_decay = 1;
+      float lr = 1e-8; // starting learning rate
+      float decay_factor = 1e-5; // factor by which the learning rate will be reduced
       std::vector<float> m;
       std::vector<float> v;
+      std::vector<float> v_max;
+
+      bool decay;
 
 };
 

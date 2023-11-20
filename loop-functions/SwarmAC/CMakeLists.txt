@@ -4,18 +4,16 @@ find_package(Torch REQUIRED)
 find_package(cppzmq)
 
 add_library(swarmac_loopfunc SHARED
-                          SCAaroundLoopFunc.h
-                          SCAaroundLoopFunc.cpp
-                          Homing.h
-                          Homing.cpp
-                          HomingTest.h
-                          HomingTest.cpp
-                          AggregationTwoSpotsXOR2.h
-                          AggregationTwoSpotsXOR2.cpp
+                        #   Homing.h
+                        #   Homing.cpp
+                        #   HomingTest.h
+                        #   HomingTest.cpp
+                        #   AggregationTwoSpotsXOR2.h
+                        #   AggregationTwoSpotsXOR2.cpp
                           AACLoopFunc.h
                           AACLoopFunc.cpp
-                          AACTestLoopFunc.h
-                          AACTestLoopFunc.cpp
+                        #   AACTestLoopFunc.h
+                        #   AACTestLoopFunc.cpp
                           ${LOOP_HEADERS}
                           ${LOOP_SOURCES})
 
