@@ -129,7 +129,7 @@ argos::CColor AACLoopFunction::GetFloorColor(const argos::CVector2& c_position_o
 /****************************************/
 
 void AACLoopFunction::PreStep() {
-  std::cout << "Prestep\n";
+  //std::cout << "Prestep\n";
   // Observe state S
   /* Check position for each agent. 
    * If robot is in cell i --> 1
@@ -216,7 +216,7 @@ void AACLoopFunction::PreStep() {
 /****************************************/
 
 void AACLoopFunction::PostStep() {
-  std::cout << "Poststep\n";
+  //std::cout << "Poststep\n";
   at::Tensor grid = torch::zeros({50, 50});
   torch::Tensor pos = torch::empty({2});
   CSpace::TMapPerType& tEpuckMap = GetSpace().GetEntitiesByType("epuck");
@@ -262,7 +262,7 @@ void AACLoopFunction::PostStep() {
   grid[grid_x][grid_y+radius] = 3;
   grid[grid_x][grid_y-radius] = 3;
   // std::cout << "GRID State:\n";
-  print_grid(grid);
+  //print_grid(grid);
   grid[grid_x][grid_y] = temp1;
   grid[grid_x+radius][grid_y] = temp2;
   grid[grid_x-radius][grid_y] = temp3;
@@ -298,14 +298,14 @@ void AACLoopFunction::PostStep() {
   delta = reward + (gamma * v_state_prime[0].item<float>()) - v_state[0].item<float>();
   
   if(fTimeStep >= 0){
-    std::cout << "TimeStep (prime) = " << fTimeStep+1 << std::endl;
+    // std::cout << "TimeStep (prime) = " << fTimeStep+1 << std::endl;
     // std::cout << "state = " << state << std::endl;
-    std::cout << "v(s) = " << v_state[0].item<float>() << std::endl;
-    std::cout << "v(s') = " << v_state_prime[0].item<float>() << std::endl;
-    std::cout << "gamma * v(s') = " << gamma * v_state_prime[0].item<float>() << std::endl;
-    std::cout << "reward = " << reward << std::endl;
-    std::cout << "delta = " << delta << std::endl;
-    std::cout << "score = " << m_fObjectiveFunction << std::endl;
+    // std::cout << "v(s) = " << v_state[0].item<float>() << std::endl;
+    // std::cout << "v(s') = " << v_state_prime[0].item<float>() << std::endl;
+    // std::cout << "gamma * v(s') = " << gamma * v_state_prime[0].item<float>() << std::endl;
+    // std::cout << "reward = " << reward << std::endl;
+    // std::cout << "delta = " << delta << std::endl;
+    // std::cout << "score = " << m_fObjectiveFunction << std::endl;
   }
  
   // Compute value trace
@@ -315,23 +315,25 @@ void AACLoopFunction::PostStep() {
   critic_net.zero_grad();
   // Compute the gradient by back-propagation
   //critic_net.print_last_layer_params();
-  std::cout << "v_state = " << v_state << std::endl;
+  //std::cout << "v_state = " << v_state << std::endl;
   v_state.backward();
   // Update value trace using gradients of each parameter
   int param_index = 0;
   for (const auto& parameter : critic_net.parameters()) {
     // Get the gradient tensor of the current parameter
     torch::Tensor gradients = parameter.grad().to(device_type);
+    torch::Tensor flat_tensor = gradients.flatten().to(torch::kFloat32);
+    std::vector<float> gradient_values(flat_tensor.numel());
+    std::memcpy(gradient_values.data(), flat_tensor.data_ptr(), flat_tensor.numel() * sizeof(float));
 
     // Get the number of elements in the gradient tensor
     int num_elements = gradients.numel();
     // Loop through each element of the gradient tensor
     for (int i = 0; i < num_elements; ++i) {
         // Access the individual element of the gradient tensor
-        float gradient_value = gradients.view(-1)[i].item<float>();
+        //float gradient_value = gradients.view(-1)[i].item<float>();
 
-        // Update the corresponding value_trace element using the gradient value
-        value_trace[param_index] = gamma * lambda_critic * value_trace[param_index] + gradient_value;
+        value_trace[param_index] = gamma * lambda_critic * value_trace[param_index] + gradient_values[i];
 
         // // Update moments for Adam
         // m[param_index] = beta1 * m[param_index] + (1.0 - beta1) * value_trace[param_index];
@@ -365,8 +367,8 @@ void AACLoopFunction::PostStep() {
 	  parameter.grad().zero_();
   }
 
-  std::cout << "accumulate of value trace: " << accumulate(value_trace.begin(),value_trace.end(),0.0) << std::endl;
-  std::cout << "value trace bias: " << value_trace[-1] << std::endl;
+  //std::cout << "accumulate of value trace: " << accumulate(value_trace.begin(),value_trace.end(),0.0) << std::endl;
+  //std::cout << "value trace bias: " << value_trace[-1] << std::endl;
   CSpace::TMapPerType cEntities = GetSpace().GetEntitiesByType("controller"); 
   std::fill(policy_update.begin(), policy_update.end(), 0.0f); 
   for (CSpace::TMapPerType::iterator it = cEntities.begin();
@@ -398,7 +400,7 @@ void AACLoopFunction::PostStep() {
   memcpy(message.data(), serialized_data.c_str(), serialized_data.size());
   m_socket_critic.send(message, zmq::send_flags::dontwait);  
   fTimeStep += 1;
-  std::cout << "Poststep over\n";
+  //std::cout << "Poststep over\n";
 }
 
 /****************************************/
@@ -420,7 +422,7 @@ Real AACLoopFunction::GetObjectiveFunction() {
 /****************************************/
 
 CVector3 AACLoopFunction::GetRandomPosition() {
-  /*
+  
   Real temp;
   Real a = m_pcRng->Uniform(CRange<Real>(0.0f, 1.0f));
   Real  b = m_pcRng->Uniform(CRange<Real>(0.0f, 1.0f));
@@ -433,38 +435,38 @@ CVector3 AACLoopFunction::GetRandomPosition() {
   Real fPosX = b * m_fDistributionRadius * cos(2 * CRadians::PI.GetValue() * (a/b));
   Real fPosY = b * m_fDistributionRadius * sin(2 * CRadians::PI.GetValue() * (a/b));
 
-  std::cout << "CVector3(" << fPosX << "," << fPosY << ", 0)," << std::endl;
+  //std::cout << "CVector3(" << fPosX << "," << fPosY << ", 0)," << std::endl;
   return CVector3(fPosX, fPosY, 0);
-  */
+  
   // Define 20 fixed positions
-    CVector3 fixedPositions[20] = {
-      CVector3(0.8,-0.01, 0),
-      CVector3(-0.95,-0.35, 0),
-      CVector3(0.22,-0.02, 0),
-      CVector3(-0.6,-0.76, 0),
-      CVector3(-0.05,0.12, 0),
-      CVector3(0,-0.48, 0),
-      CVector3(-0.34,-0.70, 0),
-      CVector3(-0.5,-0.07, 0),
-      CVector3(0.05,0.96, 0),
-      CVector3(0.32,0.55, 0),
-      CVector3(0.40,-0.79, 0),
-      CVector3(-0.34,0.81, 0),
-      CVector3(0.75,-0.64, 0),
-      CVector3(0.63,-0.16, 0),
-      CVector3(0.64,-0.59, 0),
-      CVector3(-0.06,-0.02, 0),
-      CVector3(0.83,0.56, 0),
-      CVector3(0.26,-0.5, 0),
-      CVector3(0.92,0.35, 0),
-      CVector3(-0.54,-0.64, 0)
-    };
+    // CVector3 fixedPositions[20] = {
+    //   CVector3(0.8,-0.01, 0),
+    //   CVector3(-0.95,-0.35, 0),
+    //   CVector3(0.22,-0.02, 0),
+    //   CVector3(-0.6,-0.76, 0),
+    //   CVector3(-0.05,0.12, 0),
+    //   CVector3(0,-0.48, 0),
+    //   CVector3(-0.34,-0.70, 0),
+    //   CVector3(-0.5,-0.07, 0),
+    //   CVector3(0.05,0.96, 0),
+    //   CVector3(0.32,0.55, 0),
+    //   CVector3(0.40,-0.79, 0),
+    //   CVector3(-0.34,0.81, 0),
+    //   CVector3(0.75,-0.64, 0),
+    //   CVector3(0.63,-0.16, 0),
+    //   CVector3(0.64,-0.59, 0),
+    //   CVector3(-0.06,-0.02, 0),
+    //   CVector3(0.83,0.56, 0),
+    //   CVector3(0.26,-0.5, 0),
+    //   CVector3(0.92,0.35, 0),
+    //   CVector3(-0.54,-0.64, 0)
+    // };
 
-    // Randomly choose an index between 0 and 19
-    int index = m_pcRng->Uniform(CRange<int>(0, 20));
+    // // Randomly choose an index between 0 and 19
+    // int index = m_pcRng->Uniform(CRange<int>(0, 20));
 
-    // Return the chosen position
-    return fixedPositions[index];
+    // // Return the chosen position
+    // return fixedPositions[index];
 }
 
 /****************************************/
