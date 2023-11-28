@@ -71,12 +71,12 @@ class AACLoopFunction : public CoreLoopFunctions {
 
       // Network
       int input_size = 2;
-      int hidden_size = 64;
+      int hidden_size = 128;
       int output_size = 1;
       CRange<Real> m_cNeuralNetworkOutputRange;
       // Define the ConvNet architecture
       struct Net : torch::nn::Module {  
-        Net(int64_t input_dim = 2, int64_t hidden_dim = 64, int64_t output_dim = 1){
+        Net(int64_t input_dim = 3, int64_t hidden_dim = 64, int64_t output_dim = 1){
           // Define the neural network layers in a Sequential module
           fc1 = register_module("fc1", torch::nn::Linear(input_dim, hidden_dim));
           fc2 = register_module("fc2", torch::nn::Linear(hidden_dim, hidden_dim));
@@ -112,13 +112,13 @@ class AACLoopFunction : public CoreLoopFunctions {
       // State vectors
       // Vector state;         // S at step t (50x50 grid representation)
       // Vector state_prime;   // S' at step t+1
-      torch::Tensor state = torch::empty({2});
-      torch::Tensor state_prime = torch::empty({2});
+      torch::Tensor state = torch::empty({3});
+      torch::Tensor state_prime = torch::empty({3});
       // torch::Tensor time;
       // torch::Tensor time_prime;
 
-      int size_value_net = 8577;
-      int size_policy_net = 8772;
+      int size_value_net = 8641;
+      int size_policy_net = 8836;
 
 
       float gamma = 0.99;

@@ -117,10 +117,10 @@ argos::CColor AACLoopFunction::GetFloorColor(const argos::CVector2& c_position_o
     return CColor::BLACK;
   }
 
-  d = (m_cCoordWhiteSpot - vCurrentPoint).Length();
-  if (d <= m_fRadius) {
-    return CColor::WHITE;
-  }
+  // d = (m_cCoordWhiteSpot - vCurrentPoint).Length();
+  // if (d <= m_fRadius) {
+  //   return CColor::WHITE;
+  // }
 
   return CColor::GRAY50;
 }
@@ -129,21 +129,26 @@ argos::CColor AACLoopFunction::GetFloorColor(const argos::CVector2& c_position_o
 /****************************************/
 
 void AACLoopFunction::PreStep() {
-  //std::cout << "Prestep\n";
+  // std::cout << "Prestep\n";
   // Observe state S
   /* Check position for each agent. 
    * If robot is in cell i --> 1
    * else 0
    */
   at::Tensor grid = torch::zeros({50, 50});
-  torch::Tensor pos = torch::empty({2});
+  torch::Tensor pos = torch::empty({3});
   CSpace::TMapPerType& tEpuckMap = GetSpace().GetEntitiesByType("epuck");
   CVector2 cEpuckPosition(0,0);
+  CQuaternion cEpuckOrientation;
   for (CSpace::TMapPerType::iterator it = tEpuckMap.begin(); it != tEpuckMap.end(); ++it) {
     CEPuckEntity* pcEpuck = any_cast<CEPuckEntity*>(it->second);
     cEpuckPosition.Set(pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetX(),
                        pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetY());
     
+    CRadians cRoll, cPitch, cYaw;
+    cEpuckOrientation.ToEulerAngles(cYaw, cPitch, cRoll);
+    float cEpuckAngle = cYaw.GetValue();
+
     // Scale the position to the grid size
     int grid_x = static_cast<int>(std::round((cEpuckPosition.GetX() + 1.231) / 2.462 * 49));
     int grid_y = static_cast<int>(std::round((-cEpuckPosition.GetY() + 1.231) / 2.462 * 49));
@@ -154,6 +159,7 @@ void AACLoopFunction::PreStep() {
     // PART1: State is the position of the single agent
     pos = pos.index_put_({0}, grid_x);
     pos = pos.index_put_({1}, grid_y);
+    pos = pos.index_put_({2}, cEpuckAngle);
   }
 
   state = pos.clone();
@@ -216,16 +222,21 @@ void AACLoopFunction::PreStep() {
 /****************************************/
 
 void AACLoopFunction::PostStep() {
-  //std::cout << "Poststep\n";
+  // std::cout << "Poststep\n";
   at::Tensor grid = torch::zeros({50, 50});
-  torch::Tensor pos = torch::empty({2});
+  torch::Tensor pos = torch::empty({3});
   CSpace::TMapPerType& tEpuckMap = GetSpace().GetEntitiesByType("epuck");
   CVector2 cEpuckPosition(0,0);
+  CQuaternion cEpuckOrientation;
   int reward = 0;
   for (CSpace::TMapPerType::iterator it = tEpuckMap.begin(); it != tEpuckMap.end(); ++it) {
     CEPuckEntity* pcEpuck = any_cast<CEPuckEntity*>(it->second);
     cEpuckPosition.Set(pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetX(),
                        pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetY());
+                       
+    CRadians cRoll, cPitch, cYaw;
+    cEpuckOrientation.ToEulerAngles(cYaw, cPitch, cRoll);
+    float cEpuckAngle = cYaw.GetValue();
 
     // Scale the position to the grid size
     int grid_x = static_cast<int>(std::round((cEpuckPosition.GetX() + 1.231) / 2.462 * 49));
@@ -242,6 +253,7 @@ void AACLoopFunction::PostStep() {
 
     pos = pos.index_put_({0}, grid_x);
     pos = pos.index_put_({1}, grid_y);
+    pos = pos.index_put_({2}, cEpuckAngle);
   }
   state_prime = pos.clone();
 
@@ -262,7 +274,7 @@ void AACLoopFunction::PostStep() {
   grid[grid_x][grid_y+radius] = 3;
   grid[grid_x][grid_y-radius] = 3;
   // std::cout << "GRID State:\n";
-  //print_grid(grid);
+  // print_grid(grid);
   grid[grid_x][grid_y] = temp1;
   grid[grid_x+radius][grid_y] = temp2;
   grid[grid_x-radius][grid_y] = temp3;
@@ -327,12 +339,11 @@ void AACLoopFunction::PostStep() {
     std::memcpy(gradient_values.data(), flat_tensor.data_ptr(), flat_tensor.numel() * sizeof(float));
 
     // Get the number of elements in the gradient tensor
-    int num_elements = gradients.numel();
+    int num_elements = gradient_values.size();
     // Loop through each element of the gradient tensor
-    for (int i = 0; i < num_elements; ++i) {
+    for (int i = 0; i < num_elements; i++) {
         // Access the individual element of the gradient tensor
         //float gradient_value = gradients.view(-1)[i].item<float>();
-
         value_trace[param_index] = gamma * lambda_critic * value_trace[param_index] + gradient_values[i];
 
         // // Update moments for Adam
@@ -394,13 +405,14 @@ void AACLoopFunction::PostStep() {
   memcpy(message.data(), serialized_data.c_str(), serialized_data.size());
   m_socket_actor.send(message, zmq::send_flags::dontwait);
   // critic
-  Data value_data {delta, value_update};   
+  Data value_data {delta, value_trace};   
   serialized_data = serialize(value_data);
   message.rebuild(serialized_data.size());
   memcpy(message.data(), serialized_data.c_str(), serialized_data.size());
   m_socket_critic.send(message, zmq::send_flags::dontwait);  
   fTimeStep += 1;
-  //std::cout << "Poststep over\n";
+  // std::cout << "step: " << fTimeStep << std::endl;
+  // std::cout << "Poststep over\n";
 }
 
 /****************************************/
@@ -422,21 +434,31 @@ Real AACLoopFunction::GetObjectiveFunction() {
 /****************************************/
 
 CVector3 AACLoopFunction::GetRandomPosition() {
-  
+
   Real temp;
-  Real a = m_pcRng->Uniform(CRange<Real>(0.0f, 1.0f));
-  Real  b = m_pcRng->Uniform(CRange<Real>(0.0f, 1.0f));
-  // If b < a, swap them
-  if (b < a) {
-    temp = a;
-    a = b;
-    b = temp;
-  }
-  Real fPosX = b * m_fDistributionRadius * cos(2 * CRadians::PI.GetValue() * (a/b));
-  Real fPosY = b * m_fDistributionRadius * sin(2 * CRadians::PI.GetValue() * (a/b));
+  Real a = m_pcRng->Uniform(CRange<Real>(-1.0f, 1.0f));
+  Real  b = m_pcRng->Uniform(CRange<Real>(-1.0f, 1.0f));
+
+  Real fPosX = a * 0.3 + 0.3;
+  Real fPosY = b * 0.6;
 
   //std::cout << "CVector3(" << fPosX << "," << fPosY << ", 0)," << std::endl;
   return CVector3(fPosX, fPosY, 0);
+  
+  // Real temp;
+  // Real a = m_pcRng->Uniform(CRange<Real>(0.0f, 1.0f));
+  // Real  b = m_pcRng->Uniform(CRange<Real>(0.0f, 1.0f));
+  // // If b < a, swap them
+  // if (b < a) {
+  //   temp = a;
+  //   a = b;
+  //   b = temp;
+  // }
+  // Real fPosX = b * m_fDistributionRadius * cos(2 * CRadians::PI.GetValue() * (a/b));
+  // Real fPosY = b * m_fDistributionRadius * sin(2 * CRadians::PI.GetValue() * (a/b));
+
+  // //std::cout << "CVector3(" << fPosX << "," << fPosY << ", 0)," << std::endl;
+  // return CVector3(fPosX, fPosY, 0);
   
   // Define 20 fixed positions
     // CVector3 fixedPositions[20] = {

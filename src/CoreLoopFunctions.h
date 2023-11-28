@@ -98,15 +98,31 @@ class CoreLoopFunctions: public CLoopFunctions {
     };
 
     // Define your serialization function
+    // std::string serialize(const Data& data) {
+    //     std::stringstream ss;
+    //     ss << data.delta;
+    //     ss << "\n";
+    //     std::copy(data.update.begin(), data.update.end(), std::ostream_iterator<float>(ss, " "));
+    //     return ss.str();
+    // }
     std::string serialize(const Data& data) {
-        std::stringstream ss;
-        ss << data.delta;
-        ss << "\n";
-        std::copy(data.update.begin(), data.update.end(), std::ostream_iterator<float>(ss, " "));
-        return ss.str();
+        // Calculate the size of the serialized data
+        size_t size = sizeof(data.delta) + sizeof(float) * data.update.size();
+
+        // Create a string to hold the serialized data
+        std::string serialized_data;
+        serialized_data.resize(size);
+
+        // Copy the delta value
+        std::memcpy(&serialized_data[0], &data.delta, sizeof(data.delta));
+
+        // Copy the vector
+        if (!data.update.empty()) {
+            std::memcpy(&serialized_data[sizeof(data.delta)], &data.update[0], sizeof(float) * data.update.size());
+        }
+
+        return serialized_data;
     }
-
-
 };
 
 #endif
