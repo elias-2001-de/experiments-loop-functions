@@ -54,13 +54,6 @@ void AACLoopFunction::Reset() {
   value_update.resize(size_value_net);
   std::fill(value_update.begin(), value_update.end(), 0.0f);
 
-  m.resize(size_value_net);
-  std::fill(m.begin(), m.end(), 0.0f);
-  v.resize(size_value_net);
-  std::fill(v.begin(), v.end(), 0.0f);
-  v_max.resize(size_value_net);
-  std::fill(v.begin(), v.end(), 0.0f);
-
   CoreLoopFunctions::Reset();
 }
 
@@ -75,18 +68,39 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
   } catch(std::exception e) {
   }
 
+  TConfigurationNode criticParameters;
+  criticParameters = GetNode(t_tree, "critic");
+  
+  GetNodeAttribute(criticParameters, "input_dim", input_dim);
+  GetNodeAttribute(criticParameters, "hidden_dim", hidden_dim);
+  GetNodeAttribute(criticParameters, "num_hidden_layers", num_hidden_layers);
+  GetNodeAttribute(criticParameters, "output_dim", output_dim);
+  GetNodeAttribute(criticParameters, "lambda_critic", lambda_critic);
+  GetNodeAttribute(criticParameters, "gamma", gamma);
+  GetNodeAttribute(criticParameters, "port", port);
+    
+
+  std::cout << "[ARGoS] Critic input_dim: " << input_dim << std::endl;
+  std::cout << "[ARGoS] Critic hidden_dim: " << hidden_dim << std::endl;
+  std::cout << "[ARGoS] Critic num_hidden_layers: " << num_hidden_layers << std::endl;
+  std::cout << "[ARGoS] Critic output_dim: " << output_dim << std::endl;
+  std::cout << "[ARGoS] Critic port: " << port << std::endl;
+  critic_net = Net(input_dim, hidden_dim, num_hidden_layers, output_dim);
+  
   fTimeStep = 0;
 
   m_context = zmq::context_t(1);
   m_socket_actor = zmq::socket_t(m_context, ZMQ_PUSH);
-  m_socket_actor.connect("tcp://localhost:5555");
+  m_socket_actor.connect("tcp://localhost:" + std::to_string(port));
 
   m_socket_critic = zmq::socket_t(m_context, ZMQ_PUSH);
-  m_socket_critic.connect("tcp://localhost:5556");
+  m_socket_critic.connect("tcp://localhost:" + std::to_string(port+1));
 
   // Initialise traces, delta and adam update
   delta = 0;
 
+  size_value_net = (input_dim*hidden_dim+hidden_dim) + (num_hidden_layers-1)*(hidden_dim*hidden_dim+hidden_dim) + (hidden_dim*output_dim+output_dim);
+  size_policy_net = (input_dim*hidden_dim+hidden_dim) + (num_hidden_layers-1)*(hidden_dim*hidden_dim+hidden_dim) + (4*output_dim+4); // to be changed for more flexibility
   policy_trace.resize(size_policy_net);
   std::fill(policy_trace.begin(), policy_trace.end(), 0.0f);
   value_trace.resize(size_value_net);
@@ -96,14 +110,6 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
   std::fill(policy_update.begin(), policy_update.end(), 0.0f);
   value_update.resize(size_value_net);
   std::fill(value_update.begin(), value_update.end(), 0.0f);
-
-  // Init first and second moment for adam amsgrad
-  m.resize(size_value_net);
-  std::fill(m.begin(), m.end(), 0.0f);
-  v.resize(size_value_net);
-  std::fill(v.begin(), v.end(), 0.0f);
-  v_max.resize(size_value_net);
-  std::fill(v.begin(), v.end(), 0.0f);
 
 }
 
@@ -136,18 +142,22 @@ void AACLoopFunction::PreStep() {
    * else 0
    */
   at::Tensor grid = torch::zeros({50, 50});
-  torch::Tensor pos = torch::empty({3});
+  torch::Tensor pos = torch::empty({4});
   CSpace::TMapPerType& tEpuckMap = GetSpace().GetEntitiesByType("epuck");
   CVector2 cEpuckPosition(0,0);
   CQuaternion cEpuckOrientation;
+  CRadians cRoll, cPitch, cYaw;
   for (CSpace::TMapPerType::iterator it = tEpuckMap.begin(); it != tEpuckMap.end(); ++it) {
     CEPuckEntity* pcEpuck = any_cast<CEPuckEntity*>(it->second);
     cEpuckPosition.Set(pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetX(),
                        pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetY());
-    
-    CRadians cRoll, cPitch, cYaw;
+
+    cEpuckOrientation = pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Orientation;
     cEpuckOrientation.ToEulerAngles(cYaw, cPitch, cRoll);
+    
     float cEpuckAngle = cYaw.GetValue();
+    float angleCos = std::cos(cEpuckAngle);
+    float angleSin = std::sin(cEpuckAngle); 
 
     // Scale the position to the grid size
     int grid_x = static_cast<int>(std::round((cEpuckPosition.GetX() + 1.231) / 2.462 * 49));
@@ -159,16 +169,14 @@ void AACLoopFunction::PreStep() {
     // PART1: State is the position of the single agent
     pos = pos.index_put_({0}, grid_x);
     pos = pos.index_put_({1}, grid_y);
-    pos = pos.index_put_({2}, cEpuckAngle);
+    pos = pos.index_put_({2}, angleCos);
+    pos = pos.index_put_({3}, angleSin);
   }
 
   state = pos.clone();
+  std::cout << "state: " << state << std::endl;
   // Flatten the 2D tensor to 1D for net input
   //state = grid.view({1, 1, 50, 50}).clone();
-
-  // get current time
-  //time = torch::tensor({static_cast<float>(fTimeStep)}).view({1, 1});
-  //time.set_requires_grad(true);
 
   // Load up-to-date value network
   std::vector<float> critic;
@@ -190,8 +198,6 @@ void AACLoopFunction::PreStep() {
 
   std::vector<float> actor;
   m_policy->mutex.lock();
-  // 96 weights (24 * 4) + 4 bias for Dandelion
-  // 288 weights (24 * 12) + 6 bias for Daisy
   //std::cout << "size global policy: " << m_policy->vec.size() << std::endl;
   for(auto w : m_policy->vec){
     actor.push_back(w);
@@ -224,7 +230,7 @@ void AACLoopFunction::PreStep() {
 void AACLoopFunction::PostStep() {
   // std::cout << "Poststep\n";
   at::Tensor grid = torch::zeros({50, 50});
-  torch::Tensor pos = torch::empty({3});
+  torch::Tensor pos = torch::empty({4});
   CSpace::TMapPerType& tEpuckMap = GetSpace().GetEntitiesByType("epuck");
   CVector2 cEpuckPosition(0,0);
   CQuaternion cEpuckOrientation;
@@ -237,6 +243,8 @@ void AACLoopFunction::PostStep() {
     CRadians cRoll, cPitch, cYaw;
     cEpuckOrientation.ToEulerAngles(cYaw, cPitch, cRoll);
     float cEpuckAngle = cYaw.GetValue();
+    float angleCos = std::cos(cEpuckAngle);
+    float angleSin = std::sin(cEpuckAngle); 
 
     // Scale the position to the grid size
     int grid_x = static_cast<int>(std::round((cEpuckPosition.GetX() + 1.231) / 2.462 * 49));
@@ -253,7 +261,8 @@ void AACLoopFunction::PostStep() {
 
     pos = pos.index_put_({0}, grid_x);
     pos = pos.index_put_({1}, grid_y);
-    pos = pos.index_put_({2}, cEpuckAngle);
+    pos = pos.index_put_({2}, angleCos);
+    pos = pos.index_put_({3}, angleSin);
   }
   state_prime = pos.clone();
 
@@ -295,11 +304,7 @@ void AACLoopFunction::PostStep() {
   // Flatten the 2D tensor to 1D for net input
   //state_prime = grid.view({1, 1, 50, 50}).clone().to(device_type);
 
-  // get current time
-  //time_prime = torch::tensor({static_cast<float>(fTimeStep+1)}).view({1, 1}).to(device_type);
-
   // Compute delta with Critic predictions
-  //time = time.to(device_type);
   state = state.to(device_type);
   state.set_requires_grad(true);
   state_prime = state_prime.to(device_type);
@@ -346,30 +351,6 @@ void AACLoopFunction::PostStep() {
         //float gradient_value = gradients.view(-1)[i].item<float>();
         value_trace[param_index] = gamma * lambda_critic * value_trace[param_index] + gradient_values[i];
 
-        // // Update moments for Adam
-        // m[param_index] = beta1 * m[param_index] + (1.0 - beta1) * value_trace[param_index];
-        // v[param_index] = beta2 * v[param_index] + (1.0 - beta2) * value_trace[param_index] * value_trace[param_index];
-
-        // // AMSGRAD modification: Update v_max
-        // if (fTimeStep == 0 || v_max[param_index] < v[param_index]) {
-        //     v_max[param_index] = v[param_index];
-        // }
-
-        // // Correct bias in moments
-        // float m_hat = m[param_index] / (1.0 - std::pow(beta1, fTimeStep + 1));
-
-        // // AMSGRAD modification: Use v_max for bias-corrected denominator instead of v
-        // float v_hat = v_max[param_index] / (1.0 - std::pow(beta2, fTimeStep + 1));
-
-        // // Use moments to update parameters
-        // value_update[param_index] = lr * (m_hat / (std::sqrt(v_hat) + epsilon));
-
-        // Apply weight decay
-        //value_update[param_index] += weight_decay * parameter.view(-1)[i].item<float>();
-
-        // Apply learning rate
-        //value_update[param_index] *= lr;
-
         // Move to the next index in value_trace
         param_index++;
     }
@@ -378,7 +359,7 @@ void AACLoopFunction::PostStep() {
 	  parameter.grad().zero_();
   }
 
-  //std::cout << "accumulate of value trace: " << accumulate(value_trace.begin(),value_trace.end(),0.0) << std::endl;
+  // std::cout << "accumulate of value trace: " << accumulate(value_trace.begin(),value_trace.end(),0.0) << std::endl;
   //std::cout << "value trace bias: " << value_trace[-1] << std::endl;
   CSpace::TMapPerType cEntities = GetSpace().GetEntitiesByType("controller"); 
   std::fill(policy_update.begin(), policy_update.end(), 0.0f); 
@@ -397,7 +378,7 @@ void AACLoopFunction::PostStep() {
 		  LOGERR << "Error while updating policy trace: " << ex.what() << std::endl;
 	  }
   }
-  //std::cout << "accumulate swarm policy trace: " << accumulate(policy_trace.begin(),policy_trace.end(),0.0) << std::endl;
+  // std::cout << "accumulate swarm policy trace: " << accumulate(policy_update.begin(),policy_update.end(),0.0) << std::endl;
   // actor
   Data policy_data {delta, policy_update};   
   std::string serialized_data = serialize(policy_data);
@@ -435,60 +416,36 @@ Real AACLoopFunction::GetObjectiveFunction() {
 
 CVector3 AACLoopFunction::GetRandomPosition() {
 
-  Real temp;
-  Real a = m_pcRng->Uniform(CRange<Real>(-1.0f, 1.0f));
-  Real  b = m_pcRng->Uniform(CRange<Real>(-1.0f, 1.0f));
-
-  Real fPosX = a * 0.3 + 0.3;
-  Real fPosY = b * 0.6;
-
-  //std::cout << "CVector3(" << fPosX << "," << fPosY << ", 0)," << std::endl;
-  return CVector3(fPosX, fPosY, 0);
-  
   // Real temp;
-  // Real a = m_pcRng->Uniform(CRange<Real>(0.0f, 1.0f));
-  // Real  b = m_pcRng->Uniform(CRange<Real>(0.0f, 1.0f));
-  // // If b < a, swap them
-  // if (b < a) {
-  //   temp = a;
-  //   a = b;
-  //   b = temp;
-  // }
-  // Real fPosX = b * m_fDistributionRadius * cos(2 * CRadians::PI.GetValue() * (a/b));
-  // Real fPosY = b * m_fDistributionRadius * sin(2 * CRadians::PI.GetValue() * (a/b));
+  // Real a = m_pcRng->Uniform(CRange<Real>(-1.0f, 1.0f));
+  // Real  b = m_pcRng->Uniform(CRange<Real>(-1.0f, 1.0f));
+
+  // Real fPosX = a * 0.3 + 0.3;
+  // Real fPosY = b * 0.6;
 
   // //std::cout << "CVector3(" << fPosX << "," << fPosY << ", 0)," << std::endl;
   // return CVector3(fPosX, fPosY, 0);
   
-  // Define 20 fixed positions
-    // CVector3 fixedPositions[20] = {
-    //   CVector3(0.8,-0.01, 0),
-    //   CVector3(-0.95,-0.35, 0),
-    //   CVector3(0.22,-0.02, 0),
-    //   CVector3(-0.6,-0.76, 0),
-    //   CVector3(-0.05,0.12, 0),
-    //   CVector3(0,-0.48, 0),
-    //   CVector3(-0.34,-0.70, 0),
-    //   CVector3(-0.5,-0.07, 0),
-    //   CVector3(0.05,0.96, 0),
-    //   CVector3(0.32,0.55, 0),
-    //   CVector3(0.40,-0.79, 0),
-    //   CVector3(-0.34,0.81, 0),
-    //   CVector3(0.75,-0.64, 0),
-    //   CVector3(0.63,-0.16, 0),
-    //   CVector3(0.64,-0.59, 0),
-    //   CVector3(-0.06,-0.02, 0),
-    //   CVector3(0.83,0.56, 0),
-    //   CVector3(0.26,-0.5, 0),
-    //   CVector3(0.92,0.35, 0),
-    //   CVector3(-0.54,-0.64, 0)
-    // };
+  // Real a = m_pcRng->Uniform(CRange<Real>(0.0f, 1.0f));
+  // Real  b = m_pcRng->Uniform(CRange<Real>(0.0f, 1.0f));
+  
+  // Real fPosX = std::max(b * m_fDistributionRadius * cos(2 * CRadians::PI.GetValue() * (a/b)), 0.0);
+  // Real fPosY = b * m_fDistributionRadius * sin(2 * CRadians::PI.GetValue() * (a/b));
 
-    // // Randomly choose an index between 0 and 19
-    // int index = m_pcRng->Uniform(CRange<int>(0, 20));
+  // Generate angle in range [Pi, 2*Pi] for the left half of the disk
+  Real a = m_pcRng->Uniform(CRange<Real>(0.0f, 1.0f));
+  Real b = m_pcRng->Uniform(CRange<Real>(0.0f, 1.0f));
 
-    // // Return the chosen position
-    // return fixedPositions[index];
+  // Generate angle in the range [Pi, 2*Pi] for the left half of the disk
+  Real angle = CRadians::PI.GetValue() * 0.75f + (CRadians::PI.GetValue() * 0.5f * a);
+
+  Real radius = b * m_fDistributionRadius;
+
+  Real fPosX = -radius * cos(angle);  // This will be negative or zero, for the left half of the disk
+  Real fPosY = radius * sin(angle);  // Y position
+
+  return CVector3(fPosY, fPosX, 0);
+
 }
 
 /****************************************/

@@ -70,36 +70,70 @@ class AACLoopFunction : public CoreLoopFunctions {
       zmq::socket_t m_socket_critic;
 
       // Network
-      int input_size = 2;
-      int hidden_size = 128;
-      int output_size = 1;
+      int64_t input_dim;
+      int64_t hidden_dim;
+      int64_t num_hidden_layers;
+      int64_t output_dim;
+      int64_t policy_size;
       CRange<Real> m_cNeuralNetworkOutputRange;
       // Define the ConvNet architecture
-      struct Net : torch::nn::Module {  
-        Net(int64_t input_dim = 3, int64_t hidden_dim = 64, int64_t output_dim = 1){
-          // Define the neural network layers in a Sequential module
-          fc1 = register_module("fc1", torch::nn::Linear(input_dim, hidden_dim));
-          fc2 = register_module("fc2", torch::nn::Linear(hidden_dim, hidden_dim));
-          fc3 = register_module("fc3", torch::nn::Linear(hidden_dim, hidden_dim));
-          fc4 = register_module("fc4", torch::nn::Linear(hidden_dim, output_dim));
-        }
+      // struct Net : torch::nn::Module {  
+      //   Net(int64_t input_dim = 4, int64_t hidden_dim = 64, int64_t output_dim = 1){
+      //     // Define the neural network layers in a Sequential module
+      //     fc1 = register_module("fc1", torch::nn::Linear(input_dim, hidden_dim));
+      //     fc2 = register_module("fc2", torch::nn::Linear(hidden_dim, hidden_dim));
+      //     fc3 = register_module("fc3", torch::nn::Linear(hidden_dim, hidden_dim));
+      //     fc4 = register_module("fc4", torch::nn::Linear(hidden_dim, output_dim));
+      //   }
 
-        torch::Tensor forward(torch::Tensor x) {
-          x = torch::relu(fc1->forward(x));
-          x = torch::relu(fc2->forward(x));
-          x = torch::relu(fc3->forward(x));
-          x = fc4->forward(x);
-          return x;
-        }
+      //   torch::Tensor forward(torch::Tensor x) {
+      //     x = torch::relu(fc1->forward(x));
+      //     x = torch::relu(fc2->forward(x));
+      //     x = torch::relu(fc3->forward(x));
+      //     x = fc4->forward(x);
+      //     return x;
+      //   }
 
-        void print_last_layer_params() {
-          std::cout << "Weights of last layer critic:\n" << fc4->weight << std::endl;
-          std::cout << "Bias of last layer critic:\n" << fc4->bias << std::endl;
-        }
+      //   void print_last_layer_params() {
+      //     // std::cout << "Weights of last layer critic:\n" << fc4->weight << std::endl;
+      //     // std::cout << "Bias of last layer critic:\n" << fc4->bias << std::endl;
+      //   }
 
-        //torch::nn::Sequential layers;
-        torch::nn::Linear fc1{nullptr}, fc2{nullptr}, fc3{nullptr}, fc4{nullptr};
-      };
+      //   //torch::nn::Sequential layers;
+      //   torch::nn::Linear fc1{nullptr}, fc2{nullptr}, fc3{nullptr}, fc4{nullptr};//, fc5{nullptr};
+      // };
+      struct Net : torch::nn::Module {
+          std::vector<torch::nn::Linear> hidden_layers;
+          torch::nn::Linear output_layer{nullptr};
+
+          Net(int64_t input_dim = 4, int64_t hidden_dim = 32, int64_t num_hidden_layers = 2, int64_t output_dim = 4) {
+                  // Create hidden layers
+                  for (int64_t i = 0; i < num_hidden_layers; ++i) {
+                      int64_t in_features = i == 0 ? input_dim : hidden_dim;
+                      hidden_layers.push_back(register_module("fc" + std::to_string(i+1), torch::nn::Linear(in_features, hidden_dim)));
+                  }
+
+                  // Create output layer
+                  output_layer = register_module("fc" + std::to_string(num_hidden_layers + 1), torch::nn::Linear(hidden_dim, output_dim));
+              }
+
+              torch::Tensor forward(torch::Tensor x) {
+                  // Apply hidden layers
+                  for (auto& layer : hidden_layers) {
+                      x = torch::relu(layer->forward(x));
+                  }
+
+                  // Apply output layer
+                  x = torch::softplus(output_layer->forward(x)) + 1;
+                  return x;
+              }
+
+              void print_last_layer_params() {
+                  // Print parameters of the output layer
+                  std::cout << "Weights of last layer:\n" << output_layer->weight << std::endl;
+                  std::cout << "Bias of last layer:\n" << output_layer->bias << std::endl;
+              }
+          };
       Net critic_net; // Each thread will have its own `Net` instance
 
       // Learning variables
@@ -112,32 +146,18 @@ class AACLoopFunction : public CoreLoopFunctions {
       // State vectors
       // Vector state;         // S at step t (50x50 grid representation)
       // Vector state_prime;   // S' at step t+1
-      torch::Tensor state = torch::empty({3});
-      torch::Tensor state_prime = torch::empty({3});
+      torch::Tensor state = torch::empty({4});
+      torch::Tensor state_prime = torch::empty({4});
       // torch::Tensor time;
       // torch::Tensor time_prime;
 
-      int size_value_net = 8641;
-      int size_policy_net = 8836;
+      int size_value_net;
+      int size_policy_net;
 
+      float gamma;
+      float lambda_critic;
 
-      float gamma = 0.99;
-      float lambda_critic = 0.8;
-
-
-      // adam param
-      float beta1 = 0.9;   // Exponential decay rate for first moment estimate
-      float beta2 = 0.999; // Exponential decay rate for second moment estimate
-      float epsilon = 1e-8;
-      float weight_decay = 1;
-      float lr = 1e-8; // starting learning rate
-      float decay_factor = 1e-5; // factor by which the learning rate will be reduced
-      std::vector<float> m;
-      std::vector<float> v;
-      std::vector<float> v_max;
-
-      bool decay;
-
+      int64_t port; // TCP interprocess comunication port number for crtic (port+1 for the actor)
 };
 
 #endif
