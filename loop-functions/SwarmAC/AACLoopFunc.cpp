@@ -80,12 +80,11 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
   GetNodeAttribute(criticParameters, "port", port);
     
 
-  std::cout << "[ARGoS] Critic input_dim: " << input_dim << std::endl;
-  std::cout << "[ARGoS] Critic hidden_dim: " << hidden_dim << std::endl;
-  std::cout << "[ARGoS] Critic num_hidden_layers: " << num_hidden_layers << std::endl;
-  std::cout << "[ARGoS] Critic output_dim: " << output_dim << std::endl;
-  std::cout << "[ARGoS] Critic port: " << port << std::endl;
-  critic_net = Net(input_dim, hidden_dim, num_hidden_layers, output_dim);
+  // std::cout << "[ARGoS] Critic input_dim: " << input_dim << std::endl;
+  // std::cout << "[ARGoS] Critic hidden_dim: " << hidden_dim << std::endl;
+  // std::cout << "[ARGoS] Critic num_hidden_layers: " << num_hidden_layers << std::endl;
+  // std::cout << "[ARGoS] Critic output_dim: " << output_dim << std::endl;
+  // std::cout << "[ARGoS] Critic port: " << port << std::endl;
   
   fTimeStep = 0;
 
@@ -100,7 +99,11 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
   delta = 0;
 
   size_value_net = (input_dim*hidden_dim+hidden_dim) + (num_hidden_layers-1)*(hidden_dim*hidden_dim+hidden_dim) + (hidden_dim*output_dim+output_dim);
-  size_policy_net = (input_dim*hidden_dim+hidden_dim) + (num_hidden_layers-1)*(hidden_dim*hidden_dim+hidden_dim) + (4*output_dim+4); // to be changed for more flexibility
+  size_policy_net = (input_dim*hidden_dim+hidden_dim) + (num_hidden_layers-1)*(hidden_dim*hidden_dim+hidden_dim) + (4*hidden_dim+4); // to be changed for more flexibility
+  // std::cout << "[ARGoS] size_value_net: " << size_value_net << std::endl;
+  // std::cout << "[ARGoS] size_policy_net: " << size_policy_net << std::endl;
+  critic_net = Net(input_dim, hidden_dim, num_hidden_layers, output_dim);
+
   policy_trace.resize(size_policy_net);
   std::fill(policy_trace.begin(), policy_trace.end(), 0.0f);
   value_trace.resize(size_value_net);
