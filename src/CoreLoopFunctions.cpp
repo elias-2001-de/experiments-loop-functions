@@ -85,3 +85,7 @@ void CoreLoopFunctions::SetPolicyPointer(shared_data* policy) {
 void CoreLoopFunctions::SetValuePointer(shared_data* value) {
     m_value = value;
 }
+
+void CoreLoopFunctions::SetTraining(bool value) {
+    training = value;
+}

@@ -67,24 +67,46 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
      cParametersNode = GetNode(t_tree, "params");
   } catch(std::exception e) {
   }
+  GetNodeAttribute(cParametersNode, "number_robots", nb_robots);
 
   TConfigurationNode criticParameters;
   criticParameters = GetNode(t_tree, "critic");
   
-  GetNodeAttribute(criticParameters, "input_dim", input_dim);
-  GetNodeAttribute(criticParameters, "hidden_dim", hidden_dim);
-  GetNodeAttribute(criticParameters, "num_hidden_layers", num_hidden_layers);
-  GetNodeAttribute(criticParameters, "output_dim", output_dim);
+  GetNodeAttribute(criticParameters, "input_dim", critic_input_dim);
+  GetNodeAttribute(criticParameters, "hidden_dim", critic_hidden_dim);
+  GetNodeAttribute(criticParameters, "num_hidden_layers", critic_num_hidden_layers);
+  GetNodeAttribute(criticParameters, "output_dim", critic_output_dim);
   GetNodeAttribute(criticParameters, "lambda_critic", lambda_critic);
   GetNodeAttribute(criticParameters, "gamma", gamma);
   GetNodeAttribute(criticParameters, "port", port);
-    
-
   // std::cout << "[ARGoS] Critic input_dim: " << input_dim << std::endl;
   // std::cout << "[ARGoS] Critic hidden_dim: " << hidden_dim << std::endl;
   // std::cout << "[ARGoS] Critic num_hidden_layers: " << num_hidden_layers << std::endl;
   // std::cout << "[ARGoS] Critic output_dim: " << output_dim << std::endl;
   // std::cout << "[ARGoS] Critic port: " << port << std::endl;
+
+  TConfigurationNode actorParameters;
+  argos::TConfigurationNode& parentNode = *dynamic_cast<argos::TConfigurationNode*>(t_tree.Parent());
+  TConfigurationNode controllerNode;
+  TConfigurationNode dandelNode;
+  TConfigurationNode actorNode;
+  controllerNode = GetNode(parentNode, "controllers");
+  dandelNode = GetNode(controllerNode, "dandel_controller");
+  actorParameters = GetNode(dandelNode, "actor");
+  GetNodeAttribute(actorParameters, "input_dim", actor_input_dim);
+  GetNodeAttribute(actorParameters, "hidden_dim", actor_hidden_dim);
+  GetNodeAttribute(actorParameters, "num_hidden_layers", actor_num_hidden_layers);
+  GetNodeAttribute(actorParameters, "output_dim", actor_output_dim);
+  // std::cout << "[ARGoS] Actor input_dim: " << input_dim << std::endl;
+  // std::cout << "[ARGoS] Actor hidden_dim: " << hidden_dim << std::endl;
+  // std::cout << "[ARGoS] Actor num_hidden_layers: " << num_hidden_layers << std::endl;
+  // std::cout << "[ARGoS] Actor output_dim: " << output_dim << std::endl;
+
+  TConfigurationNode frameworkNode;
+  TConfigurationNode experimentNode;
+  frameworkNode = GetNode(parentNode, "framework");
+  experimentNode = GetNode(frameworkNode, "experiment");
+  GetNodeAttribute(experimentNode, "length", mission_lengh);
   
   fTimeStep = 0;
 
@@ -98,11 +120,11 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
   // Initialise traces, delta and adam update
   delta = 0;
 
-  size_value_net = (input_dim*hidden_dim+hidden_dim) + (num_hidden_layers-1)*(hidden_dim*hidden_dim+hidden_dim) + (hidden_dim*output_dim+output_dim);
-  size_policy_net = (input_dim*hidden_dim+hidden_dim) + (num_hidden_layers-1)*(hidden_dim*hidden_dim+hidden_dim) + (4*hidden_dim+4); // to be changed for more flexibility
+  size_value_net = (critic_input_dim*critic_hidden_dim+critic_hidden_dim) + (critic_num_hidden_layers-1)*(critic_hidden_dim*critic_hidden_dim+critic_hidden_dim) + (critic_hidden_dim*critic_output_dim+critic_output_dim);
+  size_policy_net = (actor_input_dim*actor_hidden_dim+actor_hidden_dim) + (actor_num_hidden_layers-1)*(actor_hidden_dim*actor_hidden_dim+actor_hidden_dim) + (actor_hidden_dim*actor_output_dim+actor_output_dim); 
   // std::cout << "[ARGoS] size_value_net: " << size_value_net << std::endl;
   // std::cout << "[ARGoS] size_policy_net: " << size_policy_net << std::endl;
-  critic_net = Net(input_dim, hidden_dim, num_hidden_layers, output_dim);
+  critic_net = Net(critic_input_dim, critic_hidden_dim, critic_num_hidden_layers, critic_output_dim);
 
   policy_trace.resize(size_policy_net);
   std::fill(policy_trace.begin(), policy_trace.end(), 0.0f);
@@ -114,6 +136,7 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
   value_update.resize(size_value_net);
   std::fill(value_update.begin(), value_update.end(), 0.0f);
 
+  critic_net.to(device);
 }
 
 /****************************************/
@@ -145,11 +168,12 @@ void AACLoopFunction::PreStep() {
    * else 0
    */
   at::Tensor grid = torch::zeros({50, 50});
-  torch::Tensor pos = torch::empty({4});
+  torch::Tensor pos = torch::empty({critic_input_dim});
   CSpace::TMapPerType& tEpuckMap = GetSpace().GetEntitiesByType("epuck");
   CVector2 cEpuckPosition(0,0);
   CQuaternion cEpuckOrientation;
   CRadians cRoll, cPitch, cYaw;
+  int pos_index = 0;
   for (CSpace::TMapPerType::iterator it = tEpuckMap.begin(); it != tEpuckMap.end(); ++it) {
     CEPuckEntity* pcEpuck = any_cast<CEPuckEntity*>(it->second);
     cEpuckPosition.Set(pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetX(),
@@ -170,21 +194,20 @@ void AACLoopFunction::PreStep() {
     grid[grid_x][grid_y] = 1;
 
     // PART1: State is the position of the single agent
-    pos = pos.index_put_({0}, grid_x);
-    pos = pos.index_put_({1}, grid_y);
-    pos = pos.index_put_({2}, angleCos);
-    pos = pos.index_put_({3}, angleSin);
+    pos = pos.index_put_({pos_index}, grid_x);
+    pos = pos.index_put_({pos_index+1}, grid_y);
+    pos = pos.index_put_({pos_index+2}, angleCos);
+    pos = pos.index_put_({pos_index+3}, angleSin);
+    pos_index += 4;
   }
 
   state = pos.clone();
-  std::cout << "state: " << state << std::endl;
+  // std::cout << "state: " << state << std::endl;
   // Flatten the 2D tensor to 1D for net input
   //state = grid.view({1, 1, 50, 50}).clone();
 
   // Load up-to-date value network
   std::vector<float> critic;
-  std::vector<float> fc_input_weights;
-
   m_value->mutex.lock();
   for (auto w : m_value->vec) {
       critic.push_back(w);
@@ -212,19 +235,21 @@ void AACLoopFunction::PreStep() {
   // Launch the experiment with the correct random seed and network,
   // and evaluate the average fitness
   CSpace::TMapPerType cEntities = GetSpace().GetEntitiesByType("controller");
+  torch::Tensor actor_state = torch::empty({critic_input_dim/nb_robots});
+  int actor_index = 0;
   for (CSpace::TMapPerType::iterator it = cEntities.begin();
        it != cEntities.end(); ++it) {
-    CControllableEntity *pcEntity =
-        any_cast<CControllableEntity *>(it->second);
+    actor_state = state.slice(0, actor_index, actor_index+4);
+    CControllableEntity *pcEntity = any_cast<CControllableEntity *>(it->second);
     try {
-      CEpuckNNController& cController =
-      dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
-      //std::cout << "LOADNET\n";
-      cController.LoadNetwork(actor, state);
+      CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
+      cController.LoadNetwork(actor, actor_state, training);
     } catch (std::exception &ex) {
       LOGERR << "Error while setting network: " << ex.what() << std::endl;
     }
+    actor_index += 4;
   }
+  // std::cout << "Prestep end\n";
 }
 
 /****************************************/
@@ -233,18 +258,21 @@ void AACLoopFunction::PreStep() {
 void AACLoopFunction::PostStep() {
   // std::cout << "Poststep\n";
   at::Tensor grid = torch::zeros({50, 50});
-  torch::Tensor pos = torch::empty({4});
+  torch::Tensor pos = torch::empty({critic_input_dim});
   CSpace::TMapPerType& tEpuckMap = GetSpace().GetEntitiesByType("epuck");
   CVector2 cEpuckPosition(0,0);
   CQuaternion cEpuckOrientation;
+  CRadians cRoll, cPitch, cYaw;
   int reward = 0;
+  int pos_index = 0;
   for (CSpace::TMapPerType::iterator it = tEpuckMap.begin(); it != tEpuckMap.end(); ++it) {
     CEPuckEntity* pcEpuck = any_cast<CEPuckEntity*>(it->second);
     cEpuckPosition.Set(pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetX(),
                        pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetY());
                        
-    CRadians cRoll, cPitch, cYaw;
+    cEpuckOrientation = pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Orientation;
     cEpuckOrientation.ToEulerAngles(cYaw, cPitch, cRoll);
+    
     float cEpuckAngle = cYaw.GetValue();
     float angleCos = std::cos(cEpuckAngle);
     float angleSin = std::sin(cEpuckAngle); 
@@ -262,10 +290,11 @@ void AACLoopFunction::PostStep() {
     // Set the grid cell that corresponds to the epuck's position to 1
     grid[grid_x][grid_y] = 1;
 
-    pos = pos.index_put_({0}, grid_x);
-    pos = pos.index_put_({1}, grid_y);
-    pos = pos.index_put_({2}, angleCos);
-    pos = pos.index_put_({3}, angleSin);
+    pos = pos.index_put_({pos_index}, grid_x);
+    pos = pos.index_put_({pos_index+1}, grid_y);
+    pos = pos.index_put_({pos_index+2}, angleCos);
+    pos = pos.index_put_({pos_index+3}, angleSin);
+    pos_index += 4;
   }
   state_prime = pos.clone();
 
@@ -301,100 +330,91 @@ void AACLoopFunction::PostStep() {
    * If robot is in grid --> 1
    * else 0
    */
-  auto device_type = torch::kCPU;
-  critic_net.to(device_type);
-
   // Flatten the 2D tensor to 1D for net input
   //state_prime = grid.view({1, 1, 50, 50}).clone().to(device_type);
 
   // Compute delta with Critic predictions
-  state = state.to(device_type);
-  state.set_requires_grad(true);
-  state_prime = state_prime.to(device_type);
-  torch::Tensor v_state = critic_net.forward(state).to(device_type);
-  torch::Tensor v_state_prime = critic_net.forward(state_prime).to(device_type);
-  if(fTimeStep+1 == 1200)
-	  v_state_prime = torch::tensor({0}).view({1, 1});
-  delta = reward + (gamma * v_state_prime[0].item<float>()) - v_state[0].item<float>();
+  if(training){
+
+    state.set_requires_grad(true);
+    state = state.to(device);
+    state_prime = state_prime.to(device);
+    torch::Tensor v_state = critic_net.forward(state);
+    torch::Tensor v_state_prime = critic_net.forward(state_prime);
+    if(fTimeStep+1 == mission_lengh*10) v_state_prime = torch::tensor({0}).view({1, 1});
+    delta = reward + (gamma * v_state_prime[0].item<float>()) - v_state[0].item<float>();
+    
+    if(fTimeStep >= 0){
+      // std::cout << "TimeStep (prime) = " << fTimeStep+1 << std::endl;
+      // std::cout << "state = " << state << std::endl;
+      // std::cout << "v(s) = " << v_state[0].item<float>() << std::endl;
+      // std::cout << "v(s') = " << v_state_prime[0].item<float>() << std::endl;
+      // std::cout << "gamma * v(s') = " << gamma * v_state_prime[0].item<float>() << std::endl;
+      // std::cout << "reward = " << reward << std::endl;
+      // std::cout << "delta = " << delta << std::endl;
+      // std::cout << "score = " << m_fObjectiveFunction << std::endl;
+    }
   
-  if(fTimeStep >= 0){
-    // std::cout << "TimeStep (prime) = " << fTimeStep+1 << std::endl;
-    // std::cout << "state = " << state << std::endl;
-    // std::cout << "v(s) = " << v_state[0].item<float>() << std::endl;
-    // std::cout << "v(s') = " << v_state_prime[0].item<float>() << std::endl;
-    // std::cout << "gamma * v(s') = " << gamma * v_state_prime[0].item<float>() << std::endl;
-    // std::cout << "reward = " << reward << std::endl;
-    // std::cout << "delta = " << delta << std::endl;
-    // std::cout << "score = " << m_fObjectiveFunction << std::endl;
-  }
- 
-  // Compute value trace
-  v_state.to(device_type);
-  v_state.requires_grad_(true);
-  // Zero out the gradients
-  critic_net.zero_grad();
-  // Compute the gradient by back-propagation
-  //critic_net.print_last_layer_params();
-  //std::cout << "v_state = " << v_state << std::endl;
-  v_state.backward();
-  // Update value trace using gradients of each parameter
-  int param_index = 0;
-  for (const auto& parameter : critic_net.parameters()) {
-    // Get the gradient tensor of the current parameter
-    torch::Tensor gradients = parameter.grad().to(device_type);
-    torch::Tensor flat_tensor = gradients.flatten().to(torch::kFloat32);
-    std::vector<float> gradient_values(flat_tensor.numel());
-    std::memcpy(gradient_values.data(), flat_tensor.data_ptr(), flat_tensor.numel() * sizeof(float));
+    // Compute value trace
+    v_state.requires_grad_(true);
+    // Zero out the gradients
+    critic_net.zero_grad();
+    // Compute the gradient by back-propagation
+    //critic_net.print_last_layer_params();
+    //std::cout << "v_state = " << v_state << std::endl;
+    v_state.backward();
+    // Update value trace using gradients of each parameter
+    int param_index = 0;
+    for (const auto& parameter : critic_net.parameters()) {
+      // Get the gradient tensor of the current parameter
+      torch::Tensor gradients = parameter.grad();
+      torch::Tensor flat_tensor = gradients.flatten().to(torch::kFloat32);
+      torch::Tensor flat_tensor_cpu = flat_tensor.to(torch::kCPU);
+      std::vector<float> gradient_values(flat_tensor_cpu.numel());
+      std::memcpy(gradient_values.data(), flat_tensor_cpu.data_ptr(), flat_tensor_cpu.numel() * sizeof(float));
 
-    // Get the number of elements in the gradient tensor
-    int num_elements = gradient_values.size();
-    // Loop through each element of the gradient tensor
-    for (int i = 0; i < num_elements; i++) {
-        // Access the individual element of the gradient tensor
-        //float gradient_value = gradients.view(-1)[i].item<float>();
-        value_trace[param_index] = gamma * lambda_critic * value_trace[param_index] + gradient_values[i];
+      // Get the number of elements in the gradient tensor
+      int num_elements = gradient_values.size();
+      // Loop through each element of the gradient tensor
+      for (int i = 0; i < num_elements; i++) {
+          // Access the individual element of the gradient tensor
+          //float gradient_value = gradients.view(-1)[i].item<float>();
+          value_trace[param_index] = gamma * lambda_critic * value_trace[param_index] + gradient_values[i];
 
-        // Move to the next index in value_trace
-        param_index++;
+          // Move to the next index in value_trace
+          param_index++;
+      }
+
+      // Clear gradients for the current parameter to avoid interference with the next backward pass
+      parameter.grad().zero_();
     }
 
-	  // Clear gradients for the current parameter to avoid interference with the next backward pass
-	  parameter.grad().zero_();
+    // std::cout << "accumulate of value trace: " << accumulate(value_trace.begin(),value_trace.end(),0.0) << std::endl;
+    //std::cout << "value trace bias: " << value_trace[-1] << std::endl;
+    CSpace::TMapPerType cEntities = GetSpace().GetEntitiesByType("controller"); 
+    std::fill(policy_update.begin(), policy_update.end(), 0.0f); 
+    for (CSpace::TMapPerType::iterator it = cEntities.begin();
+        it != cEntities.end(); ++it) {
+      CControllableEntity *pcEntity = any_cast<CControllableEntity *>(it->second);	    
+      CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
+      std::vector<float> update = cController.GetPolicyEligibilityTrace();
+      for (int i = 0; i < size_policy_net; ++i) policy_update[i] += update[i];			
+    }
+    // std::cout << "accumulate swarm policy trace: " << accumulate(policy_update.begin(),policy_update.end(),0.0) << std::endl;
+    // actor
+    Data policy_data {delta, policy_update};   
+    std::string serialized_data = serialize(policy_data);
+    zmq::message_t message(serialized_data.size());
+    memcpy(message.data(), serialized_data.c_str(), serialized_data.size());
+    m_socket_actor.send(message, zmq::send_flags::dontwait);
+    // critic
+    Data value_data {delta, value_trace};   
+    serialized_data = serialize(value_data);
+    message.rebuild(serialized_data.size());
+    memcpy(message.data(), serialized_data.c_str(), serialized_data.size());
+    m_socket_critic.send(message, zmq::send_flags::dontwait);  
+    fTimeStep += 1;
   }
-
-  // std::cout << "accumulate of value trace: " << accumulate(value_trace.begin(),value_trace.end(),0.0) << std::endl;
-  //std::cout << "value trace bias: " << value_trace[-1] << std::endl;
-  CSpace::TMapPerType cEntities = GetSpace().GetEntitiesByType("controller"); 
-  std::fill(policy_update.begin(), policy_update.end(), 0.0f); 
-  for (CSpace::TMapPerType::iterator it = cEntities.begin();
-		  it != cEntities.end(); ++it) {
-	  CControllableEntity *pcEntity =
-		  any_cast<CControllableEntity *>(it->second);	    
-	  try {
-		  CEpuckNNController& cController =
-			  dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
-		  std::vector<float> update = cController.GetPolicyEligibilityTrace();
-		  for (int i = 0; i < size_policy_net; ++i) {			            
-			  policy_update[i] += update[i];			
-    		  }
-	  } catch (std::exception &ex) {
-		  LOGERR << "Error while updating policy trace: " << ex.what() << std::endl;
-	  }
-  }
-  // std::cout << "accumulate swarm policy trace: " << accumulate(policy_update.begin(),policy_update.end(),0.0) << std::endl;
-  // actor
-  Data policy_data {delta, policy_update};   
-  std::string serialized_data = serialize(policy_data);
-  zmq::message_t message(serialized_data.size());
-  memcpy(message.data(), serialized_data.c_str(), serialized_data.size());
-  m_socket_actor.send(message, zmq::send_flags::dontwait);
-  // critic
-  Data value_data {delta, value_trace};   
-  serialized_data = serialize(value_data);
-  message.rebuild(serialized_data.size());
-  memcpy(message.data(), serialized_data.c_str(), serialized_data.size());
-  m_socket_critic.send(message, zmq::send_flags::dontwait);  
-  fTimeStep += 1;
   // std::cout << "step: " << fTimeStep << std::endl;
   // std::cout << "Poststep over\n";
 }
@@ -564,6 +584,10 @@ void AACLoopFunction::print_grid(at::Tensor grid){
         std::cout << "+---";
     }
     std::cout << "+" << std::endl;
+}
+
+void AACLoopFunction::SetTraining(bool value) {
+    training = value;
 }
 
 REGISTER_LOOP_FUNCTIONS(AACLoopFunction, "aac_loop_functions");

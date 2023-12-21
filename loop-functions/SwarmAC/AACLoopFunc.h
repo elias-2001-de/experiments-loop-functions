@@ -53,6 +53,8 @@ class AACLoopFunction : public CoreLoopFunctions {
 
       void print_grid(at::Tensor grid);
 
+      virtual void SetTraining(bool value);
+
     private:
       Real m_fRadius;
       CVector2 m_cCoordBlackSpot;
@@ -64,44 +66,31 @@ class AACLoopFunction : public CoreLoopFunctions {
 
       // Get the time step
       int fTimeStep;
+      int mission_lengh;
       
       zmq::context_t m_context;
       zmq::socket_t m_socket_actor;
       zmq::socket_t m_socket_critic;
 
       // Network
-      int64_t input_dim;
-      int64_t hidden_dim;
-      int64_t num_hidden_layers;
-      int64_t output_dim;
-      int64_t policy_size;
+      int critic_input_dim;
+      int critic_hidden_dim;
+      int critic_num_hidden_layers;
+      int critic_output_dim;
+      int critic_policy_size;
+
+      int actor_input_dim;
+      int actor_hidden_dim;
+      int actor_num_hidden_layers;
+      int actor_output_dim;
+      int actor_policy_size;
+
+      int nb_robots;
+
+      torch::Device device = torch::kCUDA;
+
       CRange<Real> m_cNeuralNetworkOutputRange;
       // Define the ConvNet architecture
-      // struct Net : torch::nn::Module {  
-      //   Net(int64_t input_dim = 4, int64_t hidden_dim = 64, int64_t output_dim = 1){
-      //     // Define the neural network layers in a Sequential module
-      //     fc1 = register_module("fc1", torch::nn::Linear(input_dim, hidden_dim));
-      //     fc2 = register_module("fc2", torch::nn::Linear(hidden_dim, hidden_dim));
-      //     fc3 = register_module("fc3", torch::nn::Linear(hidden_dim, hidden_dim));
-      //     fc4 = register_module("fc4", torch::nn::Linear(hidden_dim, output_dim));
-      //   }
-
-      //   torch::Tensor forward(torch::Tensor x) {
-      //     x = torch::relu(fc1->forward(x));
-      //     x = torch::relu(fc2->forward(x));
-      //     x = torch::relu(fc3->forward(x));
-      //     x = fc4->forward(x);
-      //     return x;
-      //   }
-
-      //   void print_last_layer_params() {
-      //     // std::cout << "Weights of last layer critic:\n" << fc4->weight << std::endl;
-      //     // std::cout << "Bias of last layer critic:\n" << fc4->bias << std::endl;
-      //   }
-
-      //   //torch::nn::Sequential layers;
-      //   torch::nn::Linear fc1{nullptr}, fc2{nullptr}, fc3{nullptr}, fc4{nullptr};//, fc5{nullptr};
-      // };
       struct Net : torch::nn::Module {
           std::vector<torch::nn::Linear> hidden_layers;
           torch::nn::Linear output_layer{nullptr};
@@ -120,11 +109,11 @@ class AACLoopFunction : public CoreLoopFunctions {
               torch::Tensor forward(torch::Tensor x) {
                   // Apply hidden layers
                   for (auto& layer : hidden_layers) {
-                      x = torch::relu(layer->forward(x));
+                      x = torch::elu(layer->forward(x));
                   }
 
                   // Apply output layer
-                  x = torch::softplus(output_layer->forward(x)) + 1;
+                  x = output_layer->forward(x);
                   return x;
               }
 
@@ -146,8 +135,8 @@ class AACLoopFunction : public CoreLoopFunctions {
       // State vectors
       // Vector state;         // S at step t (50x50 grid representation)
       // Vector state_prime;   // S' at step t+1
-      torch::Tensor state = torch::empty({4});
-      torch::Tensor state_prime = torch::empty({4});
+      torch::Tensor state = torch::empty({critic_input_dim});
+      torch::Tensor state_prime = torch::empty({critic_input_dim});
       // torch::Tensor time;
       // torch::Tensor time_prime;
 

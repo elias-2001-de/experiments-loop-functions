@@ -59,6 +59,8 @@ class CoreLoopFunctions: public CLoopFunctions {
     shared_data* m_policy;
     shared_data* m_value;
 
+    bool training;
+
   public:
     /*
      * Initialization method where the parameters of the loop function
@@ -90,6 +92,8 @@ class CoreLoopFunctions: public CLoopFunctions {
      * Sets the value pointer
      */ 
     virtual void SetValuePointer(shared_data* value);
+
+    virtual void SetTraining(bool value);
 
     // Define your data structure
     struct Data {
