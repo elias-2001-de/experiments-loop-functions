@@ -87,42 +87,46 @@ class AACLoopFunction : public CoreLoopFunctions {
 
       int nb_robots;
 
-      torch::Device device = torch::kCUDA;
+      torch::Device device = torch::kCPU;
 
       CRange<Real> m_cNeuralNetworkOutputRange;
       // Define the ConvNet architecture
       struct Net : torch::nn::Module {
-          std::vector<torch::nn::Linear> hidden_layers;
-          torch::nn::Linear output_layer{nullptr};
+        std::vector<torch::nn::Linear> hidden_layers;
+        torch::nn::Linear output_layer{nullptr};
 
-          Net(int64_t input_dim = 4, int64_t hidden_dim = 32, int64_t num_hidden_layers = 2, int64_t output_dim = 4) {
-                  // Create hidden layers
-                  for (int64_t i = 0; i < num_hidden_layers; ++i) {
-                      int64_t in_features = i == 0 ? input_dim : hidden_dim;
-                      hidden_layers.push_back(register_module("fc" + std::to_string(i+1), torch::nn::Linear(in_features, hidden_dim)));
-                  }
+        Net(int64_t input_dim = 4, int64_t hidden_dim = 32, int64_t num_hidden_layers = 2, int64_t output_dim = 4) {
+            // Create hidden layers
+            if(num_hidden_layers > 0){
+                for (int64_t i = 0; i < num_hidden_layers; ++i) {
+                    int64_t in_features = i == 0 ? input_dim : hidden_dim;
+                    hidden_layers.push_back(register_module("fc" + std::to_string(i+1), torch::nn::Linear(in_features, hidden_dim)));
+                }
 
-                  // Create output layer
-                  output_layer = register_module("fc" + std::to_string(num_hidden_layers + 1), torch::nn::Linear(hidden_dim, output_dim));
-              }
+                // Create output layer
+                output_layer = register_module("fc" + std::to_string(num_hidden_layers + 1), torch::nn::Linear(hidden_dim, output_dim));
+            }else{
+                output_layer = register_module("fc", torch::nn::Linear(input_dim, output_dim));
+            }
+        }
 
-              torch::Tensor forward(torch::Tensor x) {
-                  // Apply hidden layers
-                  for (auto& layer : hidden_layers) {
-                      x = torch::elu(layer->forward(x));
-                  }
+        torch::Tensor forward(torch::Tensor x) {
+            // Apply hidden layers
+            for (auto& layer : hidden_layers) {
+                x = torch::relu(layer->forward(x));
+            }
 
-                  // Apply output layer
-                  x = output_layer->forward(x);
-                  return x;
-              }
+            // Apply output layer
+            x = output_layer->forward(x);
+            return x;
+        }
 
-              void print_last_layer_params() {
-                  // Print parameters of the output layer
-                  std::cout << "Weights of last layer:\n" << output_layer->weight << std::endl;
-                  std::cout << "Bias of last layer:\n" << output_layer->bias << std::endl;
-              }
-          };
+            void print_last_layer_params() {
+                // Print parameters of the output layer
+                std::cout << "Weights of last layer:\n" << output_layer->weight << std::endl;
+                std::cout << "Bias of last layer:\n" << output_layer->bias << std::endl;
+            }
+        };
       Net critic_net; // Each thread will have its own `Net` instance
 
       // Learning variables

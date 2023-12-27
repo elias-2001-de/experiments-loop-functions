@@ -120,8 +120,18 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
   // Initialise traces, delta and adam update
   delta = 0;
 
-  size_value_net = (critic_input_dim*critic_hidden_dim+critic_hidden_dim) + (critic_num_hidden_layers-1)*(critic_hidden_dim*critic_hidden_dim+critic_hidden_dim) + (critic_hidden_dim*critic_output_dim+critic_output_dim);
-  size_policy_net = (actor_input_dim*actor_hidden_dim+actor_hidden_dim) + (actor_num_hidden_layers-1)*(actor_hidden_dim*actor_hidden_dim+actor_hidden_dim) + (actor_hidden_dim*actor_output_dim+actor_output_dim); 
+  if(actor_num_hidden_layers>0){
+    size_policy_net = (actor_input_dim*actor_hidden_dim+actor_hidden_dim) + (actor_num_hidden_layers-1)*(actor_hidden_dim*actor_hidden_dim+actor_hidden_dim) + (actor_hidden_dim*actor_output_dim+actor_output_dim);
+  }else{
+    size_policy_net = actor_input_dim*actor_output_dim + actor_output_dim;
+  }
+
+  if(critic_num_hidden_layers>0){
+    size_value_net = (critic_input_dim*critic_hidden_dim+critic_hidden_dim) + (critic_num_hidden_layers-1)*(critic_hidden_dim*critic_hidden_dim+critic_hidden_dim) + (critic_hidden_dim*critic_output_dim+critic_output_dim);
+  }else{
+    size_value_net = critic_input_dim*critic_output_dim + critic_output_dim;
+  }
+
   // std::cout << "[ARGoS] size_value_net: " << size_value_net << std::endl;
   // std::cout << "[ARGoS] size_policy_net: " << size_policy_net << std::endl;
   critic_net = Net(critic_input_dim, critic_hidden_dim, critic_num_hidden_layers, critic_output_dim);
@@ -182,13 +192,13 @@ void AACLoopFunction::PreStep() {
     cEpuckOrientation = pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Orientation;
     cEpuckOrientation.ToEulerAngles(cYaw, cPitch, cRoll);
     
-    float cEpuckAngle = cYaw.GetValue();
+    float cEpuckAngle = M_PI/2 + cYaw.GetValue();
     float angleCos = std::cos(cEpuckAngle);
     float angleSin = std::sin(cEpuckAngle); 
 
     // Scale the position to the grid size
-    int grid_x = static_cast<int>(std::round((cEpuckPosition.GetX() + 1.231) / 2.462 * 49));
-    int grid_y = static_cast<int>(std::round((-cEpuckPosition.GetY() + 1.231) / 2.462 * 49));
+    int grid_x = static_cast<int>(std::round((-cEpuckPosition.GetY() + 1.231) / 2.462 * 49));
+    int grid_y = static_cast<int>(std::round((cEpuckPosition.GetX() + 1.231) / 2.462 * 49));
 
     // Set the grid cell that corresponds to the epuck's position to 1
     grid[grid_x][grid_y] = 1;
@@ -273,13 +283,13 @@ void AACLoopFunction::PostStep() {
     cEpuckOrientation = pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Orientation;
     cEpuckOrientation.ToEulerAngles(cYaw, cPitch, cRoll);
     
-    float cEpuckAngle = cYaw.GetValue();
+    float cEpuckAngle = M_PI/2 + cYaw.GetValue();
     float angleCos = std::cos(cEpuckAngle);
     float angleSin = std::sin(cEpuckAngle); 
 
     // Scale the position to the grid size
-    int grid_x = static_cast<int>(std::round((cEpuckPosition.GetX() + 1.231) / 2.462 * 49));
-    int grid_y = static_cast<int>(std::round((-cEpuckPosition.GetY() + 1.231) / 2.462 * 49));
+    int grid_x = static_cast<int>(std::round((-cEpuckPosition.GetY() + 1.231) / 2.462 * 49));
+    int grid_y = static_cast<int>(std::round((cEpuckPosition.GetX() + 1.231) / 2.462 * 49));
 
     Real fDistanceSpot = (m_cCoordBlackSpot - cEpuckPosition).Length();
     if (fDistanceSpot <= m_fRadius) {
@@ -344,14 +354,14 @@ void AACLoopFunction::PostStep() {
     if(fTimeStep+1 == mission_lengh*10) v_state_prime = torch::tensor({0}).view({1, 1});
     delta = reward + (gamma * v_state_prime[0].item<float>()) - v_state[0].item<float>();
     
-    if(fTimeStep >= 0){
+    if(fTimeStep+1 <= mission_lengh*10){
       // std::cout << "TimeStep (prime) = " << fTimeStep+1 << std::endl;
       // std::cout << "state = " << state << std::endl;
-      // std::cout << "v(s) = " << v_state[0].item<float>() << std::endl;
-      // std::cout << "v(s') = " << v_state_prime[0].item<float>() << std::endl;
+      std::cout << "v(s) = " << v_state[0].item<float>() << std::endl;
+      std::cout << "v(s') = " << v_state_prime[0].item<float>() << std::endl;
       // std::cout << "gamma * v(s') = " << gamma * v_state_prime[0].item<float>() << std::endl;
-      // std::cout << "reward = " << reward << std::endl;
-      // std::cout << "delta = " << delta << std::endl;
+      std::cout << "reward = " << reward << std::endl;
+      std::cout << "delta = " << delta << std::endl;
       // std::cout << "score = " << m_fObjectiveFunction << std::endl;
     }
   
@@ -400,7 +410,7 @@ void AACLoopFunction::PostStep() {
       std::vector<float> update = cController.GetPolicyEligibilityTrace();
       for (int i = 0; i < size_policy_net; ++i) policy_update[i] += update[i];			
     }
-    // std::cout << "accumulate swarm policy trace: " << accumulate(policy_update.begin(),policy_update.end(),0.0) << std::endl;
+    std::cout << "accumulate swarm policy trace: " << accumulate(policy_update.begin(),policy_update.end(),0.0) << std::endl;
     // actor
     Data policy_data {delta, policy_update};   
     std::string serialized_data = serialize(policy_data);
