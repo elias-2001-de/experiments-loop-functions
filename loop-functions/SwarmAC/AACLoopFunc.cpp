@@ -204,10 +204,14 @@ void AACLoopFunction::PreStep() {
     grid[grid_x][grid_y] = 1;
 
     // PART1: State is the position of the single agent
-    pos = pos.index_put_({pos_index}, grid_x);
-    pos = pos.index_put_({pos_index+1}, grid_y);
-    pos = pos.index_put_({pos_index+2}, angleCos);
-    pos = pos.index_put_({pos_index+3}, angleSin);
+    // pos = pos.index_put_({pos_index}, grid_x);
+    // pos = pos.index_put_({pos_index+1}, grid_y);
+    // pos = pos.index_put_({pos_index+2}, angleCos);
+    // pos = pos.index_put_({pos_index+3}, angleSin);
+    pos = pos.index_put_({pos_index}, cEpuckPosition.GetX());
+    pos = pos.index_put_({pos_index+1}, cEpuckPosition.GetY());
+    pos = pos.index_put_({pos_index+2}, std::cos(cYaw.GetValue()));
+    pos = pos.index_put_({pos_index+3}, std::sin(cYaw.GetValue()));
     pos_index += 4;
   }
 
@@ -300,10 +304,14 @@ void AACLoopFunction::PostStep() {
     // Set the grid cell that corresponds to the epuck's position to 1
     grid[grid_x][grid_y] = 1;
 
-    pos = pos.index_put_({pos_index}, grid_x);
-    pos = pos.index_put_({pos_index+1}, grid_y);
-    pos = pos.index_put_({pos_index+2}, angleCos);
-    pos = pos.index_put_({pos_index+3}, angleSin);
+    // pos = pos.index_put_({pos_index}, grid_x);
+    // pos = pos.index_put_({pos_index+1}, grid_y);
+    // pos = pos.index_put_({pos_index+2}, angleCos);
+    // pos = pos.index_put_({pos_index+3}, angleSin);
+    pos = pos.index_put_({pos_index}, cEpuckPosition.GetX());
+    pos = pos.index_put_({pos_index+1}, cEpuckPosition.GetY());
+    pos = pos.index_put_({pos_index+2}, std::cos(cYaw.GetValue()));
+    pos = pos.index_put_({pos_index+3}, std::sin(cYaw.GetValue()));
     pos_index += 4;
   }
   state_prime = pos.clone();
@@ -356,7 +364,7 @@ void AACLoopFunction::PostStep() {
     
     if(fTimeStep+1 <= mission_lengh*10){
       // std::cout << "TimeStep (prime) = " << fTimeStep+1 << std::endl;
-      // std::cout << "state = " << state << std::endl;
+      std::cout << "state = " << state << std::endl;
       std::cout << "v(s) = " << v_state[0].item<float>() << std::endl;
       std::cout << "v(s') = " << v_state_prime[0].item<float>() << std::endl;
       // std::cout << "gamma * v(s') = " << gamma * v_state_prime[0].item<float>() << std::endl;

@@ -113,7 +113,7 @@ class AACLoopFunction : public CoreLoopFunctions {
         torch::Tensor forward(torch::Tensor x) {
             // Apply hidden layers
             for (auto& layer : hidden_layers) {
-                x = torch::relu(layer->forward(x));
+                x = torch::elu(layer->forward(x));
             }
 
             // Apply output layer
