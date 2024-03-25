@@ -97,8 +97,7 @@ class CoreLoopFunctions: public CLoopFunctions {
 
     // Define your data structure
     struct Data {
-      float delta;
-      std::vector<float> update;
+      std::vector<float> param;
     };
 
     // Define your serialization function
@@ -111,18 +110,15 @@ class CoreLoopFunctions: public CLoopFunctions {
     // }
     std::string serialize(const Data& data) {
         // Calculate the size of the serialized data
-        size_t size = sizeof(data.delta) + sizeof(float) * data.update.size();
+        size_t size = sizeof(float) * data.param.size();
 
         // Create a string to hold the serialized data
         std::string serialized_data;
         serialized_data.resize(size);
 
-        // Copy the delta value
-        std::memcpy(&serialized_data[0], &data.delta, sizeof(data.delta));
-
-        // Copy the vector
-        if (!data.update.empty()) {
-            std::memcpy(&serialized_data[sizeof(data.delta)], &data.update[0], sizeof(float) * data.update.size());
+        // Copy the vector's contents into the string
+        if (!data.param.empty()) {
+            std::memcpy(&serialized_data[0], &data.param[0], size);
         }
 
         return serialized_data;

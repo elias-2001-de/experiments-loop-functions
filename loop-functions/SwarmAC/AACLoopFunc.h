@@ -90,12 +90,13 @@ class AACLoopFunction : public CoreLoopFunctions {
       torch::Device device = torch::kCPU;
 
       CRange<Real> m_cNeuralNetworkOutputRange;
-      // Define the ConvNet architecture
-      struct Net : torch::nn::Module {
+      
+      // Define the Actor and Critic Nets
+      struct Critic_Net : torch::nn::Module {
         std::vector<torch::nn::Linear> hidden_layers;
         torch::nn::Linear output_layer{nullptr};
 
-        Net(int64_t input_dim = 4, int64_t hidden_dim = 32, int64_t num_hidden_layers = 2, int64_t output_dim = 4) {
+        Critic_Net(int64_t input_dim = 4, int64_t hidden_dim = 64, int64_t num_hidden_layers = 3, int64_t output_dim = 1) {
             // Create hidden layers
             if(num_hidden_layers > 0){
                 for (int64_t i = 0; i < num_hidden_layers; ++i) {
@@ -113,7 +114,7 @@ class AACLoopFunction : public CoreLoopFunctions {
         torch::Tensor forward(torch::Tensor x) {
             // Apply hidden layers
             for (auto& layer : hidden_layers) {
-                x = torch::elu(layer->forward(x));
+                x = torch::tanh(layer->forward(x));
             }
 
             // Apply output layer
@@ -127,14 +128,56 @@ class AACLoopFunction : public CoreLoopFunctions {
                 std::cout << "Bias of last layer:\n" << output_layer->bias << std::endl;
             }
         };
-      Net critic_net; // Each thread will have its own `Net` instance
+      Critic_Net critic_net; // Each thread will have its own `Net` instance
+
+    //   struct Actor_Net : torch::nn::Module {
+    //     std::vector<torch::nn::Linear> hidden_layers;
+    //     torch::nn::Linear alpha_layer{nullptr};
+    //     torch::nn::Linear beta_layer{nullptr};
+
+    //     Actor_Net(int64_t input_dim = 25, int64_t hidden_dim = 64, int64_t num_hidden_layers = 3, int64_t output_dim = 2) {
+    //         // Create hidden layers
+    //         if(num_hidden_layers > 0){
+    //             for (int64_t i = 0; i < num_hidden_layers; ++i) {
+    //                 int64_t in_features = i == 0 ? input_dim : hidden_dim;
+    //                 hidden_layers.push_back(register_module("fc" + std::to_string(i+1), torch::nn::Linear(in_features, hidden_dim)));
+    //             }
+
+    //             // Create output layer
+    //             alpha_layer = register_module("alpha_fc", torch::nn::Linear(hidden_dim, output_dim));
+    //             beta_layer = register_module("beta_fc", torch::nn::Linear(hidden_dim, output_dim));
+    //         }else{
+    //             alpha_layer = register_module("alpha_fc", torch::nn::Linear(input_dim, output_dim));
+    //             beta_layer = register_module("beta_fc", torch::nn::Linear(input_dim, output_dim));
+    //         }
+    //     }
+
+    //     std::tuple<torch::Tensor, torch::Tensor> forward(torch::Tensor x) {
+    //         // Apply hidden layers
+    //         for (auto& layer : hidden_layers) {
+    //             x = layer->forward(x);
+    //         }
+
+    //         // Apply output layer
+    //         auto alpha = torch::softplus(alpha_layer->forward(x)) + 1;
+    //         auto beta = torch::softplus(beta_layer->forward(x)) + 1;
+    //         return std::make_tuple(alpha, beta);
+    //     }
+
+    //     void print_last_layer_params() {
+    //         // Print parameters of the output layer
+    //         std::cout << "Weights of last layer:\n" << alpha_layer->weight << std::endl;
+    //         std::cout << "Bias of last layer:\n" << alpha_layer->bias << std::endl;
+    //     }
+    //   };
+      argos::CEpuckNNController::Actor_Net actor_net;
 
       // Learning variables
-      float delta;
-      std::vector<float> value_trace;
-      std::vector<float> policy_trace;
-      std::vector<float> value_update;
-      std::vector<float> policy_update;
+      torch::Tensor delta;
+      std::vector<torch::Tensor> value_trace;
+      std::vector<torch::Tensor> policy_trace;
+      std::vector<float> value_param;
+      std::vector<float> policy_param;
 
       // State vectors
       // Vector state;         // S at step t (50x50 grid representation)
@@ -149,8 +192,12 @@ class AACLoopFunction : public CoreLoopFunctions {
 
       float gamma;
       float lambda_critic;
+      float lambda_actor;
 
       int64_t port; // TCP interprocess comunication port number for crtic (port+1 for the actor)
+
+      std::shared_ptr<torch::optim::Optimizer> optimizer_actor;
+      std::shared_ptr<torch::optim::Optimizer> optimizer_critic;
 };
 
 #endif
