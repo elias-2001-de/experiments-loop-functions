@@ -47,8 +47,17 @@ void AACLoopFunction::Reset() {
   value_param.resize(size_value_net);
   std::fill(value_param.begin(), value_param.end(), 0.0f);
 
+  for (int i = 0; i < policy_trace.size(); ++i) 
+      policy_trace[i] -= policy_trace[i];
+
+  for (int i = 0; i < value_trace.size(); ++i) 
+      value_trace[i] -= value_trace[i];
+    
+
   optimizer_critic->zero_grad();
   optimizer_actor->zero_grad();
+
+  I = 1;
 
   CoreLoopFunctions::Reset();
 }
@@ -73,6 +82,7 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
   GetNodeAttribute(criticParameters, "num_hidden_layers", critic_num_hidden_layers);
   GetNodeAttribute(criticParameters, "output_dim", critic_output_dim);
   GetNodeAttribute(criticParameters, "lambda_critic", lambda_critic);
+  GetNodeAttribute(criticParameters, "alpha_critic", alpha_critic);
   GetNodeAttribute(criticParameters, "gamma", gamma);
   GetNodeAttribute(criticParameters, "port", port);
 
@@ -89,6 +99,7 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
   GetNodeAttribute(actorParameters, "num_hidden_layers", actor_num_hidden_layers);
   GetNodeAttribute(actorParameters, "output_dim", actor_output_dim);
   GetNodeAttribute(actorParameters, "lambda_actor", lambda_actor);
+  GetNodeAttribute(actorParameters, "alpha_actor", alpha_actor);
 
   TConfigurationNode frameworkNode;
   TConfigurationNode experimentNode;
@@ -123,15 +134,17 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
   critic_net.to(device);
   actor_net.to(device);
 
-  optimizer_actor = std::make_shared<torch::optim::Adam>(actor_net.parameters(), torch::optim::AdamOptions(lambda_actor));
+  optimizer_actor = std::make_shared<torch::optim::Adam>(actor_net.parameters(), torch::optim::AdamOptions(alpha_critic));
   optimizer_actor->zero_grad();
-  optimizer_critic = std::make_shared<torch::optim::Adam>(critic_net.parameters(), torch::optim::AdamOptions(lambda_critic));
+  optimizer_critic = std::make_shared<torch::optim::Adam>(critic_net.parameters(), torch::optim::AdamOptions(alpha_actor));
   optimizer_critic->zero_grad();
 
   policy_param.resize(size_policy_net);
   std::fill(policy_param.begin(), policy_param.end(), 0.0f);
   value_param.resize(size_value_net);
   std::fill(value_param.begin(), value_param.end(), 0.0f);
+
+  I = 1;
 }
 
 /****************************************/
@@ -252,6 +265,7 @@ void AACLoopFunction::PreStep() {
 /****************************************/
 
 void AACLoopFunction::PostStep() {
+  // std::cout << "Post step\n";
   at::Tensor grid = torch::zeros({50, 50});
   torch::Tensor pos = torch::empty({critic_input_dim});
   CSpace::TMapPerType& tEpuckMap = GetSpace().GetEntitiesByType("epuck");
@@ -335,157 +349,127 @@ void AACLoopFunction::PostStep() {
    */
 
   // Compute delta with Critic predictions
-  if(training){
+  if (training) {
+    // Assuming 'state', 'state_prime', 'rewards', 'device', 'gamma', 'lambda_critic', 'lambda_actor', and 'I'
+    // are already defined and initialized appropriately.
 
-    state.set_requires_grad(true);
     state = state.to(device);
     state_prime = state_prime.to(device);
+
+    // Forward passes
     torch::Tensor v_state = critic_net.forward(state);
     torch::Tensor v_state_prime = critic_net.forward(state_prime);
-    if(fTimeStep+1 == mission_lengh*10) v_state_prime = torch::tensor({0}).view({1, 1});
-    float reward = 0;
-    for (auto& n : rewards) reward += n;
-    delta = reward + (gamma * v_state_prime[0]) - v_state[0];
-    auto critic_loss = delta*delta;
-    std::vector<torch::Tensor> td_errors(nb_robots);
-    for (int i = 0; i < rewards.size(); i++)
-      td_errors[i] = rewards[i] + (gamma * v_state_prime[0]) - v_state[0];
-    
-    if(fTimeStep+1 <= mission_lengh*10){
-      // std::cout << "TimeStep (prime) = " << fTimeStep+1 << std::endl;
-      // std::cout << "state = " << state << std::endl;
-      // std::cout << "v(s) = " << v_state[0].item<float>() << std::endl;
-      // std::cout << "v(s') = " << v_state_prime[0].item<float>() << std::endl;
-      // std::cout << "gamma * v(s') = " << gamma * v_state_prime[0].item<float>() << std::endl;
-      // std::cout << "reward = " << reward << std::endl;
-      // std::cout << "delta = " << delta << std::endl;
-      // std::cout << "score = " << m_fObjectiveFunction << std::endl;
+
+    // Adjust for the terminal state
+    if (fTimeStep + 1 == mission_lengh * 10) {
+        v_state_prime = torch::zeros_like(v_state_prime);
     }
-  
+
+    // Global reward
+    float total_reward = std::accumulate(rewards.begin(), rewards.end(), 0.0f);
+    torch::Tensor total_reward_tensor = torch::tensor({total_reward}, torch::dtype(torch::kFloat32).device(device));
+
+    // TD error
+    torch::Tensor delta = total_reward_tensor + gamma * v_state_prime - v_state;
+
+    // Critic Loss
+    torch::Tensor critic_loss = delta.pow(2).mean();
+
+    // Backward and optimize for critic
     optimizer_critic->zero_grad();
     critic_loss.backward();
-    auto critic_params = critic_net.parameters();
-    for (size_t i = 0; i < critic_params.size(); ++i) {
-        auto& param = critic_params[i];
-        // Ensure there is a gradient to work with
-        if (param.grad().defined()) {
-            if (i < value_trace.size()) {
-                value_trace[i].mul_(gamma * lambda_critic).add_(param.grad().data());
-            } else {
-                // Initialize value_trace[i] if it doesn't already exist
-                value_trace.push_back(param.grad().clone().mul(gamma * lambda_critic));
-            }
-            param.mutable_grad() = value_trace[i].clone();
-        }
-    }
-
-    // Step the optimizer to update the model parameters
+    // Update critic parameters with eligibility traces
+    // int param_index = 0;
+    // for (auto& param : critic_net.parameters()) {
+    //     if (param.grad().defined()) {
+    //         auto grad = param.grad().view(-1);
+    //         for (int64_t i = 0; i < grad.numel(); ++i) {
+    //             if (param_index < value_trace.size()) {
+    //                 value_trace[param_index] = value_trace[param_index] * gamma * lambda_critic + grad[i];
+    //             } else {
+    //                 value_trace.push_back(grad[i]); // Initialize if not exist
+    //             }
+    //             // Manually update the gradients with the traced value
+    //             grad[i] = value_trace[param_index];
+    //             param_index++;
+    //         }
+    //         param.grad().view(-1).copy_(grad);
+    //     }
+    // }
     optimizer_critic->step();
 
-    int rb_iter = 0;
-    std::vector<torch::Tensor> log_probs(nb_robots);
+    // Compute individual TD errors for policy loss calculation
+    torch::Tensor rewards_tensor = torch::tensor(rewards, torch::dtype(torch::kFloat32).device(device)).unsqueeze(1); // [nb_robots, 1]
+
+    torch::Tensor individual_delta = rewards_tensor + gamma * v_state_prime/nb_robots - v_state/nb_robots; // [nb_robots, 1]
+
+    // Prepare for policy update
+    std::vector<torch::Tensor> log_probs;
     CSpace::TMapPerType cEntities = GetSpace().GetEntitiesByType("controller"); 
     for (CSpace::TMapPerType::iterator it = cEntities.begin();
         it != cEntities.end(); ++it) {
-      CControllableEntity *pcEntity = any_cast<CControllableEntity *>(it->second);	    
+      CControllableEntity *pcEntity = any_cast<CControllableEntity *>(it->second);      
       CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
-      log_probs[rb_iter] = cController.GetPolicyLogProbs();	
-      rb_iter++;
+      log_probs.push_back(cController.GetPolicyLogProbs()); 
     }
 
-    // Ensure log_probs and td_errors have the same size.
-    if (log_probs.size() != td_errors.size()) {
-        throw std::runtime_error("log_probs and td_errors vectors must be the same size.");
-    }
+    // Calculate policy loss using the per-robot TD error times the logprob
+    torch::Tensor policy_loss = -(torch::stack(log_probs) * individual_delta.detach()).sum(); // Sum of element-wise product
 
-    // Calculate policy loss
-    // Initialize a tensor to accumulate policy loss
-    torch::Tensor policy_loss = torch::tensor(0.0, torch::requires_grad(true));
-    for (size_t i = 0; i < log_probs.size(); ++i) {
-        // Assuming log_probs and td_errors are directly related and of the same size
-        torch::Tensor contribution = log_probs[i] * td_errors[i].detach();
-        policy_loss = policy_loss + contribution;
-    }
-
-    // Negate the final result.
-    policy_loss = -policy_loss;
-
+    // Backward and optimize for actor
     optimizer_actor->zero_grad();
     policy_loss.backward();
-    auto actor_params = actor_net.parameters();
-    for (size_t i = 0; i < actor_params.size(); ++i) {
-        auto& param = actor_params[i];
-        // Ensure there is a gradient to work with
-        if (param.grad().defined()) {
-            if (i < policy_trace.size()) {
-                policy_trace[i].mul_(gamma * lambda_actor).add_(param.grad().data());
-            } else {
-                // Initialize value_trace[i] if it doesn't already exist
-                policy_trace.push_back(param.grad().clone().mul(gamma * lambda_actor));
-            }
-            param.mutable_grad() = policy_trace[i].clone();
-        }
-    }
+    // Update actor parameters with eligibility traces
+    // param_index = 0;
+    // for (auto& param : actor_net.parameters()) {
+    //     if (param.grad().defined()) {
+    //         auto grad = param.grad().view(-1);
+    //         for (int64_t i = 0; i < grad.numel(); ++i) {
+    //             if (param_index < policy_trace.size()) {
+    //                 policy_trace[param_index] = policy_trace[param_index] * gamma * lambda_actor + grad[i] * I;
+    //             } else {
+    //                 policy_trace.push_back(grad[i] * I); // Initialize if not exist
+    //             }
+    //             // Manually update the gradients with the traced value
+    //             grad[i] = policy_trace[param_index];
+    //             param_index++;
+    //         }
+    //         param.grad().view(-1).copy_(grad);
+    //     }
+    // }
     optimizer_actor->step();
 
-    // Lambda to extract and flatten parameters from a given module
-    auto extract_and_flatten_critic_parameters = [&](const torch::nn::Module& module) {
-      for (const auto& p : module.parameters()) {
-          if (p.defined()) {
-              // First, flatten the tensor and store it in a variable to extend its lifetime
-              auto p_flat = p.view(-1);
+    // Compute eligibility traces for actor parameters if needed
+    // Similar to previously discussed logic
 
-              // Now, obtain an accessor on the non-temporary tensor
-              auto p_accessor = p_flat.accessor<float, 1>();
+    I *= gamma; // Update the decay term for the eligibility traces
 
-              // You can now safely use p_accessor to access the tensor's data
-              for(int64_t i = 0; i < p_accessor.size(0); ++i) {
-                  value_param.push_back(p_accessor[i]);
-              }
-          }
-      }
-    };
-
-    // Extract and flatten parameters from the network
-    extract_and_flatten_critic_parameters(critic_net);
-
-
-    // Lambda to extract and flatten parameters from a given module
-    auto extract_and_flatten_actor_parameters = [&](const torch::nn::Module& module) {
-      for (const auto& p : module.parameters()) {
-          if (p.defined()) {
-              // First, flatten the tensor and store it in a variable to extend its lifetime
-              auto p_flat = p.view(-1);
-
-              // Now, obtain an accessor on the non-temporary tensor
-              auto p_accessor = p_flat.accessor<float, 1>();
-
-              // You can now safely use p_accessor to access the tensor's data
-              for(int64_t i = 0; i < p_accessor.size(0); ++i) {
-                  policy_param.push_back(p_accessor[i]);
-              }
-          }
-      }
-    };
-
-    // Extract and flatten parameters from the network
-    extract_and_flatten_actor_parameters(actor_net);
+    GetParametersVector(actor_net, policy_param);
+    GetParametersVector(critic_net, value_param);
 
     // actor
+    // std::cout << "policy_param: " << policy_param << std::endl;
     Data policy_data {policy_param};   
     std::string serialized_data = serialize(policy_data);
     zmq::message_t message(serialized_data.size());
     memcpy(message.data(), serialized_data.c_str(), serialized_data.size());
     m_socket_actor.send(message, zmq::send_flags::dontwait);
     // critic
+    // std::cout << "value_param: " << value_param << std::endl;
     Data value_data {value_param};   
     serialized_data = serialize(value_data);
     message.rebuild(serialized_data.size());
     memcpy(message.data(), serialized_data.c_str(), serialized_data.size());
     m_socket_critic.send(message, zmq::send_flags::dontwait);  
+    
     fTimeStep += 1;
+
+    // std::cout << "value_param " << value_param << std::endl;
+    // std::cout << "value_param size " << value_param.size() << std::endl;
+    // std::cout << "policy_param " << policy_param << std::endl;
+    // std::cout << "policy_param size " << policy_param.size() << std::endl;
   }
-  std::cout << "step: " << fTimeStep << std::endl;
+  // std::cout << "Step: " << fTimeStep << std::endl;
 }
 
 /****************************************/
@@ -557,35 +541,25 @@ double AACLoopFunction::computeBetaLogPDF(double alpha, double beta, double x) {
 /****************************************/
 /****************************************/
 
-// Assuming actor_net is your Actor Neural Network (an instance of torch::nn::Module)
-// Assuming behavior_probs, beta_parameters, chosen_behavior, chosen_parameter, and td_error are already computed
+void AACLoopFunction::GetParametersVector(const torch::nn::Module& module, std::vector<float>& params_vector) {
+    // Calculate total number of parameters
+    int64_t total_params = 0;
+    for (const auto& p : module.parameters()) {
+        total_params += p.numel();
+    }
 
-void AACLoopFunction::update_actor(torch::nn::Module& actor_net, torch::Tensor& behavior_probs, 
-                  torch::Tensor& beta_parameters, int chosen_behavior, 
-                  double chosen_parameter, double td_error, 
-                  torch::optim::Optimizer& optimizer) {
+    // Clear the vector and reserve space to avoid reallocations
+    params_vector.clear();
+    params_vector.reserve(total_params);
 
-    // Compute log-probability of chosen behavior
-    auto log_prob_behavior = torch::log(behavior_probs[chosen_behavior]);
-
-    // Compute parameters for Beta distribution
-    auto alpha = beta_parameters[chosen_behavior][0].item<double>();
-    auto beta = beta_parameters[chosen_behavior][1].item<double>();
-
-    // Compute log-PDF of Beta distribution at the chosen parameter
-    auto log_pdf_beta = computeBetaLogPDF(alpha, beta, chosen_parameter);
-
-    // Compute the surrogate objective
-    auto loss = - (log_prob_behavior + log_pdf_beta) * td_error;  // The minus sign because we want to do gradient ascent
-
-    // Zero gradients
-    optimizer.zero_grad();
-
-    // Compute gradients w.r.t. actor network parameters (weight and biases)
-    loss.backward();
-
-    // Perform one step of the optimization (gradient descent)
-    optimizer.step();
+    // Iterate through all parameters and add their elements to the vector
+    for (const auto& p : module.parameters()) {
+        auto p_data_ptr = p.data().view(-1).data_ptr<float>();
+        auto num_elements = p.numel();
+        for (int64_t i = 0; i < num_elements; ++i) {
+            params_vector.push_back(p_data_ptr[i]);
+        }
+    }
 }
 
 
