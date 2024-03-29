@@ -15,6 +15,7 @@
 #include <zmq.hpp>
 
 #include <cmath>
+#include <unordered_map>
 
 #include "../../src/CoreLoopFunctions.h"
 #include "../../../AC_trainer/src/shared_mem.h"
@@ -129,11 +130,11 @@ class AACLoopFunction : public CoreLoopFunctions {
       argos::CEpuckNNController::Actor_Net actor_net;
 
       // Learning variables
-      std::vector<torch::Tensor> value_trace;
-      std::vector<torch::Tensor> policy_trace;
+      std::unordered_map<std::string, torch::Tensor> eligibility_trace_critic;
+      std::unordered_map<std::string, torch::Tensor> eligibility_trace_actor;
       std::vector<float> value_param;
       std::vector<float> policy_param;
-      int I;
+      float I;
 
       torch::Tensor state = torch::empty({critic_input_dim});
       torch::Tensor state_prime = torch::empty({critic_input_dim});

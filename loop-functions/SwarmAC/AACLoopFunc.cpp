@@ -47,11 +47,17 @@ void AACLoopFunction::Reset() {
   value_param.resize(size_value_net);
   std::fill(value_param.begin(), value_param.end(), 0.0f);
 
-  for (int i = 0; i < policy_trace.size(); ++i) 
-      policy_trace[i] -= policy_trace[i];
+  for (const auto& named_param : critic_net.named_parameters()) {
+      if (named_param.value().requires_grad()) {
+          eligibility_trace_critic[named_param.key()] = torch::zeros_like(named_param.value());
+      }
+  }
 
-  for (int i = 0; i < value_trace.size(); ++i) 
-      value_trace[i] -= value_trace[i];
+  for (const auto& named_param : actor_net.named_parameters()) {
+      if (named_param.value().requires_grad()) {
+          eligibility_trace_actor[named_param.key()] = torch::zeros_like(named_param.value());
+      }
+  }
     
 
   optimizer_critic->zero_grad();
@@ -143,6 +149,18 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
   std::fill(policy_param.begin(), policy_param.end(), 0.0f);
   value_param.resize(size_value_net);
   std::fill(value_param.begin(), value_param.end(), 0.0f);
+
+  for (const auto& named_param : critic_net.named_parameters()) {
+      if (named_param.value().requires_grad()) {
+          eligibility_trace_critic[named_param.key()] = torch::zeros_like(named_param.value());
+      }
+  }
+
+  for (const auto& named_param : actor_net.named_parameters()) {
+      if (named_param.value().requires_grad()) {
+          eligibility_trace_actor[named_param.key()] = torch::zeros_like(named_param.value());
+      }
+  }
 
   I = 1;
 }
@@ -378,24 +396,15 @@ void AACLoopFunction::PostStep() {
     // Backward and optimize for critic
     optimizer_critic->zero_grad();
     critic_loss.backward();
-    // Update critic parameters with eligibility traces
-    // int param_index = 0;
-    // for (auto& param : critic_net.parameters()) {
-    //     if (param.grad().defined()) {
-    //         auto grad = param.grad().view(-1);
-    //         for (int64_t i = 0; i < grad.numel(); ++i) {
-    //             if (param_index < value_trace.size()) {
-    //                 value_trace[param_index] = value_trace[param_index] * gamma * lambda_critic + grad[i];
-    //             } else {
-    //                 value_trace.push_back(grad[i]); // Initialize if not exist
-    //             }
-    //             // Manually update the gradients with the traced value
-    //             grad[i] = value_trace[param_index];
-    //             param_index++;
-    //         }
-    //         param.grad().view(-1).copy_(grad);
-    //     }
-    // }
+    // Update eligibility traces and gradients
+    for (auto& named_param : critic_net.named_parameters()) {
+        auto& param = named_param.value();
+        if (param.grad().defined()) {
+            auto& eligibility = eligibility_trace_critic[named_param.key()];
+            eligibility.mul_(gamma * lambda_critic).add_(param.grad());
+            param.mutable_grad() = eligibility.clone();
+        }
+    }
     optimizer_critic->step();
 
     // Compute individual TD errors for policy loss calculation
@@ -419,28 +428,16 @@ void AACLoopFunction::PostStep() {
     // Backward and optimize for actor
     optimizer_actor->zero_grad();
     policy_loss.backward();
-    // Update actor parameters with eligibility traces
-    // param_index = 0;
-    // for (auto& param : actor_net.parameters()) {
-    //     if (param.grad().defined()) {
-    //         auto grad = param.grad().view(-1);
-    //         for (int64_t i = 0; i < grad.numel(); ++i) {
-    //             if (param_index < policy_trace.size()) {
-    //                 policy_trace[param_index] = policy_trace[param_index] * gamma * lambda_actor + grad[i] * I;
-    //             } else {
-    //                 policy_trace.push_back(grad[i] * I); // Initialize if not exist
-    //             }
-    //             // Manually update the gradients with the traced value
-    //             grad[i] = policy_trace[param_index];
-    //             param_index++;
-    //         }
-    //         param.grad().view(-1).copy_(grad);
-    //     }
-    // }
+    // Update eligibility traces and gradients
+    for (auto& named_param : actor_net.named_parameters()) {
+        auto& param = named_param.value();
+        if (param.grad().defined()) {
+            auto& eligibility = eligibility_trace_actor[named_param.key()];
+            eligibility.mul_(gamma * lambda_actor).add_(param.grad() * I);
+            param.mutable_grad() = eligibility.clone();
+        }
+    }
     optimizer_actor->step();
-
-    // Compute eligibility traces for actor parameters if needed
-    // Similar to previously discussed logic
 
     I *= gamma; // Update the decay term for the eligibility traces
 
