@@ -73,6 +73,11 @@ class CoreLoopFunctions: public CLoopFunctions {
      */
     virtual Real GetObjectiveFunction() = 0;
 
+    virtual float GetTDError() = 0;
+    virtual float GetCriticLoss() = 0;
+    virtual float GetActorLoss() = 0;
+    virtual float GetEntropy() = 0;
+
     /*
      * Return a random position.
      */
@@ -81,7 +86,7 @@ class CoreLoopFunctions: public CLoopFunctions {
     /*
      * Returns the Behavioral characterization vector, for repertoire generation
      */
-    virtual std::vector<Real> GetSDBC() {}; 
+    //virtual std::vector<Real> GetSDBC() {}; 
 
     /*
      * Sets the policy pointer

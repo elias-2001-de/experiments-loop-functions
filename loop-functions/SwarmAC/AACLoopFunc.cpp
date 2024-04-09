@@ -14,9 +14,9 @@
 /****************************************/
 
 AACLoopFunction::AACLoopFunction() {
-  m_fRadius = 0.6;
+  m_fRadius = 0.3;
   m_cCoordBlackSpot = CVector2(0,-0.6);
-  //m_cCoordWhiteSpot = CVector2(0,0.6);
+  m_cCoordWhiteSpot = CVector2(0,0.6);
   m_fObjectiveFunction = 0;
 }
 
@@ -59,11 +59,25 @@ void AACLoopFunction::Reset() {
       }
   }
     
+  critic_net.to(torch::kCPU);
+  actor_net.to(torch::kCPU);
 
   optimizer_critic->zero_grad();
   optimizer_actor->zero_grad();
 
   I = 1;
+
+  TDerrors.resize(mission_lengh);
+  std::fill(TDerrors.begin(), TDerrors.end(), 0.0f);
+
+  Entropies.resize(mission_lengh);
+  std::fill(Entropies.begin(), Entropies.end(), 0.0f);
+
+  critic_losses.resize(mission_lengh);
+  std::fill(critic_losses.begin(), critic_losses.end(), 0.0f);
+
+  actor_losses.resize(mission_lengh);
+  std::fill(actor_losses.begin(), actor_losses.end(), 0.0f);
 
   CoreLoopFunctions::Reset();
 }
@@ -77,6 +91,7 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
   try {
      cParametersNode = GetNode(t_tree, "params");
   } catch(std::exception e) {
+    LOGERR << "Error reading ARGOS file: " << e.what() << std::endl;
   }
   GetNodeAttribute(cParametersNode, "number_robots", nb_robots);
 
@@ -84,6 +99,7 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
   criticParameters = GetNode(t_tree, "critic");
   
   GetNodeAttribute(criticParameters, "input_dim", critic_input_dim);
+  critic_input_dim *= nb_robots;
   GetNodeAttribute(criticParameters, "hidden_dim", critic_hidden_dim);
   GetNodeAttribute(criticParameters, "num_hidden_layers", critic_num_hidden_layers);
   GetNodeAttribute(criticParameters, "output_dim", critic_output_dim);
@@ -106,12 +122,14 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
   GetNodeAttribute(actorParameters, "output_dim", actor_output_dim);
   GetNodeAttribute(actorParameters, "lambda_actor", lambda_actor);
   GetNodeAttribute(actorParameters, "alpha_actor", alpha_actor);
+  GetNodeAttribute(actorParameters, "entropy", entropy_fact);
 
   TConfigurationNode frameworkNode;
   TConfigurationNode experimentNode;
   frameworkNode = GetNode(parentNode, "framework");
   experimentNode = GetNode(frameworkNode, "experiment");
   GetNodeAttribute(experimentNode, "length", mission_lengh);
+  mission_lengh *= 10;
   
   fTimeStep = 0;
 
@@ -137,8 +155,8 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
   critic_net = Critic_Net(critic_input_dim, critic_hidden_dim, critic_num_hidden_layers, critic_output_dim);
   actor_net = argos::CEpuckNNController::Actor_Net(actor_input_dim, actor_hidden_dim, actor_num_hidden_layers, actor_output_dim);
 
-  critic_net.to(device);
-  actor_net.to(device);
+  critic_net.to(torch::kCPU);
+  actor_net.to(torch::kCPU);
 
   optimizer_actor = std::make_shared<torch::optim::Adam>(actor_net.parameters(), torch::optim::AdamOptions(alpha_critic));
   optimizer_actor->zero_grad();
@@ -162,6 +180,18 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
       }
   }
 
+  TDerrors.resize(mission_lengh);
+  std::fill(TDerrors.begin(), TDerrors.end(), 0.0f);
+
+  Entropies.resize(mission_lengh);
+  std::fill(Entropies.begin(), Entropies.end(), 0.0f);
+
+  critic_losses.resize(mission_lengh);
+  std::fill(critic_losses.begin(), critic_losses.end(), 0.0f);
+
+  actor_losses.resize(mission_lengh);
+  std::fill(actor_losses.begin(), actor_losses.end(), 0.0f);
+
   I = 1;
 }
 
@@ -175,10 +205,10 @@ argos::CColor AACLoopFunction::GetFloorColor(const argos::CVector2& c_position_o
     return CColor::BLACK;
   }
 
-  // d = (m_cCoordWhiteSpot - vCurrentPoint).Length();
-  // if (d <= m_fRadius) {
-  //   return CColor::WHITE;
-  // }
+  d = (m_cCoordWhiteSpot - vCurrentPoint).Length();
+  if (d <= m_fRadius) {
+    return CColor::WHITE;
+  }
 
   return CColor::GRAY50;
 }
@@ -187,12 +217,6 @@ argos::CColor AACLoopFunction::GetFloorColor(const argos::CVector2& c_position_o
 /****************************************/
 
 void AACLoopFunction::PreStep() {
-  // std::cout << "Prestep\n";
-  // Observe state S
-  /* Check position for each agent. 
-   * If robot is in cell i --> 1
-   * else 0
-   */
   at::Tensor grid = torch::zeros({50, 50});
   torch::Tensor pos = torch::empty({critic_input_dim});
   CSpace::TMapPerType& tEpuckMap = GetSpace().GetEntitiesByType("epuck");
@@ -203,15 +227,11 @@ void AACLoopFunction::PreStep() {
   for (CSpace::TMapPerType::iterator it = tEpuckMap.begin(); it != tEpuckMap.end(); ++it) {
     CEPuckEntity* pcEpuck = any_cast<CEPuckEntity*>(it->second);
     cEpuckPosition.Set(pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetX(),
-                       pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetY());
+                      pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetY());
 
     cEpuckOrientation = pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Orientation;
     cEpuckOrientation.ToEulerAngles(cYaw, cPitch, cRoll);
     
-    float cEpuckAngle = M_PI/2 + cYaw.GetValue();
-    float angleCos = std::cos(cEpuckAngle);
-    float angleSin = std::sin(cEpuckAngle); 
-
     // Scale the position to the grid size
     int grid_x = static_cast<int>(std::round((-cEpuckPosition.GetY() + 1.231) / 2.462 * 49));
     int grid_y = static_cast<int>(std::round((cEpuckPosition.GetX() + 1.231) / 2.462 * 49));
@@ -228,9 +248,6 @@ void AACLoopFunction::PreStep() {
   }
 
   state = pos.clone();
-  // std::cout << "state: " << state << std::endl;
-  // Flatten the 2D tensor to 1D for net input
-  //state = grid.view({1, 1, 50, 50}).clone();
 
   // Load up-to-date value network
   std::vector<float> critic;
@@ -283,14 +300,13 @@ void AACLoopFunction::PreStep() {
 /****************************************/
 
 void AACLoopFunction::PostStep() {
-  // std::cout << "Post step\n";
   at::Tensor grid = torch::zeros({50, 50});
   torch::Tensor pos = torch::empty({critic_input_dim});
   CSpace::TMapPerType& tEpuckMap = GetSpace().GetEntitiesByType("epuck");
   CVector2 cEpuckPosition(0,0);
   CQuaternion cEpuckOrientation;
   CRadians cRoll, cPitch, cYaw;
-  std::vector<int> rewards(nb_robots, 0);
+  std::vector<float> rewards(nb_robots, 0);
   int pos_index = 0;
   int i = 0;
   for (CSpace::TMapPerType::iterator it = tEpuckMap.begin(); it != tEpuckMap.end(); ++it) {
@@ -300,10 +316,6 @@ void AACLoopFunction::PostStep() {
                        
     cEpuckOrientation = pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Orientation;
     cEpuckOrientation.ToEulerAngles(cYaw, cPitch, cRoll);
-    
-    float cEpuckAngle = M_PI/2 + cYaw.GetValue();
-    float angleCos = std::cos(cEpuckAngle);
-    float angleSin = std::sin(cEpuckAngle); 
 
     // Scale the position to the grid size
     int grid_x = static_cast<int>(std::round((-cEpuckPosition.GetY() + 1.231) / 2.462 * 49));
@@ -311,19 +323,16 @@ void AACLoopFunction::PostStep() {
 
     Real fDistanceSpot = (m_cCoordBlackSpot - cEpuckPosition).Length();
     if (fDistanceSpot <= m_fRadius) {
-      m_fObjectiveFunction += 1;
-      rewards[i] = 1;
+      rewards[i] = 1.0;
     }else{
-      rewards[i] = 0;
+      rewards[i] = std::pow(10, -3 * fDistanceSpot / m_fDistributionRadius);
+      // rewards[i] = 0;
     }
+    m_fObjectiveFunction += rewards[i];
 
     // Set the grid cell that corresponds to the epuck's position to 1
     grid[grid_x][grid_y] = 1;
 
-    // pos = pos.index_put_({pos_index}, grid_x);
-    // pos = pos.index_put_({pos_index+1}, grid_y);
-    // pos = pos.index_put_({pos_index+2}, angleCos);
-    // pos = pos.index_put_({pos_index+3}, angleSin);
     pos = pos.index_put_({pos_index}, cEpuckPosition.GetX());
     pos = pos.index_put_({pos_index+1}, cEpuckPosition.GetY());
     pos = pos.index_put_({pos_index+2}, std::cos(cYaw.GetValue()));
@@ -331,116 +340,97 @@ void AACLoopFunction::PostStep() {
     pos_index += 4;
     i++;
   }
-  state_prime = pos.clone();
-
-  // std::cout << "score: " << m_fObjectiveFunction << std::endl;	  
-  // place spot in grid
-  int grid_x = static_cast<int>(std::round((m_cCoordBlackSpot.GetX() + 1.231) / 2.462 * 49));
-  int grid_y = static_cast<int>(std::round((-m_cCoordBlackSpot.GetY() + 1.231) / 2.462 * 49));
-  int radius = static_cast<int>(std::round(m_fRadius / 2.462 * 49));
-  // Print arena on the terminal
-  auto temp1 = grid[grid_x][grid_y];
-  auto temp2 = grid[grid_x+radius][grid_y];
-  auto temp3 = grid[grid_x-radius][grid_y];
-  auto temp4 = grid[grid_x][grid_y+radius];
-  auto temp5 = grid[grid_x][grid_y-radius];
-  grid[grid_x][grid_y] = 2;
-  grid[grid_x+radius][grid_y] = 3;
-  grid[grid_x-radius][grid_y] = 3;
-  grid[grid_x][grid_y+radius] = 3;
-  grid[grid_x][grid_y-radius] = 3;
-  // std::cout << "GRID State:\n";
-  // print_grid(grid);
-  grid[grid_x][grid_y] = temp1;
-  grid[grid_x+radius][grid_y] = temp2;
-  grid[grid_x-radius][grid_y] = temp3;
-  grid[grid_x][grid_y+radius] = temp4;
-  grid[grid_x][grid_y-radius] = temp5;
-  //}
-  //m_fObjectiveFunction = m_unScoreSpot1/(Real) m_unNumberRobots;
-  //LOG << "Score = " << m_fObjectiveFunction << std::endl;
-
-  // Observe state S'
-  /* Check position for each agent. 
-   * If robot is in grid --> 1
-   * else 0
-   */
 
   // Compute delta with Critic predictions
   if (training) {
-    // Assuming 'state', 'state_prime', 'rewards', 'device', 'gamma', 'lambda_critic', 'lambda_actor', and 'I'
-    // are already defined and initialized appropriately.
+    try{
+      state_prime = pos.clone();
 
-    state = state.to(device);
-    state_prime = state_prime.to(device);
+      state = state.to(device);
+      state_prime = state_prime.to(device);
 
-    // Forward passes
-    torch::Tensor v_state = critic_net.forward(state);
-    torch::Tensor v_state_prime = critic_net.forward(state_prime);
+      // Forward passes
+      critic_net.to(device);
+      torch::Tensor v_state = critic_net.forward(state);
+      torch::Tensor v_state_prime = critic_net.forward(state_prime);
 
-    // Adjust for the terminal state
-    if (fTimeStep + 1 == mission_lengh * 10) {
-        v_state_prime = torch::zeros_like(v_state_prime);
+      // Adjust for the terminal state
+      if (fTimeStep + 1 == mission_lengh) {
+          v_state_prime = torch::zeros_like(v_state_prime);
+      }
+
+      // Global reward
+      float total_reward = std::accumulate(rewards.begin(), rewards.end(), 0.0f);
+      torch::Tensor total_reward_tensor = torch::tensor({total_reward}, torch::dtype(torch::kFloat32).device(device));
+
+      // TD error
+      torch::Tensor delta = total_reward_tensor + gamma * v_state_prime - v_state;
+      TDerrors[fTimeStep] = delta.item<float>();
+
+      // Critic Loss
+      torch::Tensor critic_loss = delta.pow(2).mean();
+      critic_losses[fTimeStep] = critic_loss.item<float>();
+
+      // Backward and optimize for critic
+      optimizer_critic->zero_grad();
+      critic_loss.backward();
+      // Update eligibility traces and gradients
+      for (auto& named_param : critic_net.named_parameters()) {
+          auto& param = named_param.value();
+          if (param.grad().defined()) {
+              auto& eligibility = eligibility_trace_critic[named_param.key()];
+              eligibility.mul_(gamma * lambda_critic).add_(param.grad());
+              param.mutable_grad() = eligibility.clone();
+          }
+      }
+      optimizer_critic->step();
+
+      // Compute individual TD errors for policy loss calculation
+      torch::Tensor rewards_tensor = torch::tensor(rewards, torch::dtype(torch::kFloat32).device(device)).unsqueeze(1); // [nb_robots, 1]
+      torch::Tensor individual_delta = rewards_tensor + (gamma * v_state_prime - v_state)/nb_robots; // [nb_robots, 1]
+
+      // Prepare for policy update
+      std::vector<torch::Tensor> log_probs;
+      std::vector<torch::Tensor> entropies;
+      CSpace::TMapPerType cEntities = GetSpace().GetEntitiesByType("controller"); 
+      for (CSpace::TMapPerType::iterator it = cEntities.begin();
+          it != cEntities.end(); ++it) {
+        CControllableEntity *pcEntity = any_cast<CControllableEntity *>(it->second);      
+        CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
+        log_probs.push_back(cController.GetPolicyLogProbs().to(device)); 
+        entropies.push_back(cController.GetPolicyEntropy().to(device)); 
+      }
+
+      // Calculate policy loss using the per-robot TD error times the logprob
+      torch::Tensor policy_loss = -(torch::stack(log_probs) * individual_delta.detach()).sum(); // Sum of element-wise product
+
+      // Add entropy term for better exploration
+      torch::Tensor entropy = torch::stack(entropies).sum();
+      policy_loss -= entropy_fact * entropy;
+      // std::cout << "policy_loss: " << policy_loss << std::endl;
+      actor_losses[fTimeStep] = policy_loss.item<float>();
+      Entropies[fTimeStep] = entropy.item<float>();
+
+      // Backward and optimize for actor
+      actor_net.to(device);
+      optimizer_actor->zero_grad();
+      policy_loss.backward();
+      // Update eligibility traces and gradients
+      for (auto& named_param : actor_net.named_parameters()) {
+          auto& param = named_param.value();
+          if (param.grad().defined()) {
+              auto& eligibility = eligibility_trace_actor[named_param.key()];
+              eligibility.mul_(gamma * lambda_actor).add_(param.grad() * I);
+              param.mutable_grad() = eligibility.clone();
+          }
+          // std::cout << "actor " <<  named_param.key() << " grad: " << param.grad() << std::endl;
+      }
+      optimizer_actor->step();
+
+      I *= gamma; // Update the decay term for the eligibility traces
+    }catch (std::exception &ex) {
+      LOGERR << "Error in training loop: " << ex.what() << std::endl;
     }
-
-    // Global reward
-    float total_reward = std::accumulate(rewards.begin(), rewards.end(), 0.0f);
-    torch::Tensor total_reward_tensor = torch::tensor({total_reward}, torch::dtype(torch::kFloat32).device(device));
-
-    // TD error
-    torch::Tensor delta = total_reward_tensor + gamma * v_state_prime - v_state;
-
-    // Critic Loss
-    torch::Tensor critic_loss = delta.pow(2).mean();
-
-    // Backward and optimize for critic
-    optimizer_critic->zero_grad();
-    critic_loss.backward();
-    // Update eligibility traces and gradients
-    for (auto& named_param : critic_net.named_parameters()) {
-        auto& param = named_param.value();
-        if (param.grad().defined()) {
-            auto& eligibility = eligibility_trace_critic[named_param.key()];
-            eligibility.mul_(gamma * lambda_critic).add_(param.grad());
-            param.mutable_grad() = eligibility.clone();
-        }
-    }
-    optimizer_critic->step();
-
-    // Compute individual TD errors for policy loss calculation
-    torch::Tensor rewards_tensor = torch::tensor(rewards, torch::dtype(torch::kFloat32).device(device)).unsqueeze(1); // [nb_robots, 1]
-
-    torch::Tensor individual_delta = rewards_tensor + gamma * v_state_prime/nb_robots - v_state/nb_robots; // [nb_robots, 1]
-
-    // Prepare for policy update
-    std::vector<torch::Tensor> log_probs;
-    CSpace::TMapPerType cEntities = GetSpace().GetEntitiesByType("controller"); 
-    for (CSpace::TMapPerType::iterator it = cEntities.begin();
-        it != cEntities.end(); ++it) {
-      CControllableEntity *pcEntity = any_cast<CControllableEntity *>(it->second);      
-      CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
-      log_probs.push_back(cController.GetPolicyLogProbs()); 
-    }
-
-    // Calculate policy loss using the per-robot TD error times the logprob
-    torch::Tensor policy_loss = -(torch::stack(log_probs) * individual_delta.detach()).sum(); // Sum of element-wise product
-
-    // Backward and optimize for actor
-    optimizer_actor->zero_grad();
-    policy_loss.backward();
-    // Update eligibility traces and gradients
-    for (auto& named_param : actor_net.named_parameters()) {
-        auto& param = named_param.value();
-        if (param.grad().defined()) {
-            auto& eligibility = eligibility_trace_actor[named_param.key()];
-            eligibility.mul_(gamma * lambda_actor).add_(param.grad() * I);
-            param.mutable_grad() = eligibility.clone();
-        }
-    }
-    optimizer_actor->step();
-
-    I *= gamma; // Update the decay term for the eligibility traces
-
     GetParametersVector(actor_net, policy_param);
     GetParametersVector(critic_net, value_param);
 
@@ -458,15 +448,34 @@ void AACLoopFunction::PostStep() {
     message.rebuild(serialized_data.size());
     memcpy(message.data(), serialized_data.c_str(), serialized_data.size());
     m_socket_critic.send(message, zmq::send_flags::dontwait);  
-    
-    fTimeStep += 1;
-
-    // std::cout << "value_param " << value_param << std::endl;
-    // std::cout << "value_param size " << value_param.size() << std::endl;
-    // std::cout << "policy_param " << policy_param << std::endl;
-    // std::cout << "policy_param size " << policy_param.size() << std::endl;
   }
-  // std::cout << "Step: " << fTimeStep << std::endl;
+
+  fTimeStep += 1;
+  // std::cout << "step: " << fTimeStep << std::endl;
+
+  // if(!training){
+  //   // place spot in grid
+  //   int grid_x = static_cast<int>(std::round((m_cCoordBlackSpot.GetX() + 1.231) / 2.462 * 49));
+  //   int grid_y = static_cast<int>(std::round((-m_cCoordBlackSpot.GetY() + 1.231) / 2.462 * 49));
+  //   int radius = static_cast<int>(std::round(m_fRadius / 2.462 * 49));
+  //   // Print arena on the terminal
+  //   auto temp1 = grid[grid_x][grid_y];
+  //   auto temp2 = grid[grid_x+radius][grid_y];
+  //   auto temp3 = grid[grid_x-radius][grid_y];
+  //   auto temp4 = grid[grid_x][grid_y+radius];
+  //   auto temp5 = grid[grid_x][grid_y-radius];
+  //   grid[grid_x][grid_y] = 2;
+  //   grid[grid_x+radius][grid_y] = 3;
+  //   grid[grid_x-radius][grid_y] = 3;
+  //   grid[grid_x][grid_y+radius] = 3;
+  //   grid[grid_x][grid_y-radius] = 3;
+  //   print_grid(grid, fTimeStep);
+  //   grid[grid_x][grid_y] = temp1;
+  //   grid[grid_x+radius][grid_y] = temp2;
+  //   grid[grid_x-radius][grid_y] = temp3;
+  //   grid[grid_x][grid_y+radius] = temp4;
+  //   grid[grid_x][grid_y-radius] = temp5;
+  // }
 }
 
 /****************************************/
@@ -487,38 +496,58 @@ Real AACLoopFunction::GetObjectiveFunction() {
 /****************************************/
 /****************************************/
 
+float AACLoopFunction::GetTDError() {
+  float sum = std::accumulate(TDerrors.begin(), TDerrors.end(), 0.0f);
+  float average = sum / TDerrors.size();
+  return average;
+}
+
+/****************************************/
+/****************************************/
+
+float AACLoopFunction::GetEntropy() {
+  float sum = std::accumulate(Entropies.begin(), Entropies.end(), 0.0f);
+  float average = sum / Entropies.size();
+  return average;
+}
+
+/****************************************/
+/****************************************/
+
+float AACLoopFunction::GetActorLoss() {
+  float sum = std::accumulate(actor_losses.begin(), actor_losses.end(), 0.0f);
+  float average = sum / actor_losses.size();
+  return average;
+}
+
+
+/****************************************/
+/****************************************/
+
+float AACLoopFunction::GetCriticLoss() {
+  float sum = std::accumulate(critic_losses.begin(), critic_losses.end(), 0.0f);
+  float average = sum / critic_losses.size();
+  return average;
+}
+
+
+/****************************************/
+/****************************************/
+
 CVector3 AACLoopFunction::GetRandomPosition() {
-
-  // Real temp;
-  // Real a = m_pcRng->Uniform(CRange<Real>(-1.0f, 1.0f));
-  // Real  b = m_pcRng->Uniform(CRange<Real>(-1.0f, 1.0f));
-
-  // Real fPosX = a * 0.3 + 0.3;
-  // Real fPosY = b * 0.6;
-
-  // //std::cout << "CVector3(" << fPosX << "," << fPosY << ", 0)," << std::endl;
-  // return CVector3(fPosX, fPosY, 0);
-  
-  // Real a = m_pcRng->Uniform(CRange<Real>(0.0f, 1.0f));
-  // Real  b = m_pcRng->Uniform(CRange<Real>(0.0f, 1.0f));
-  
-  // Real fPosX = std::max(b * m_fDistributionRadius * cos(2 * CRadians::PI.GetValue() * (a/b)), 0.0);
-  // Real fPosY = b * m_fDistributionRadius * sin(2 * CRadians::PI.GetValue() * (a/b));
-
-  // Generate angle in range [Pi, 2*Pi] for the left half of the disk
+  Real temp;
   Real a = m_pcRng->Uniform(CRange<Real>(0.0f, 1.0f));
-  Real b = m_pcRng->Uniform(CRange<Real>(0.0f, 1.0f));
+  Real  b = m_pcRng->Uniform(CRange<Real>(0.0f, 1.0f));
+  // If b < a, swap them
+  if (b < a) {
+    temp = a;
+    a = b;
+    b = temp;
+  }
+  Real fPosX = b * m_fDistributionRadius * cos(2 * CRadians::PI.GetValue() * (a/b));
+  Real fPosY = b * m_fDistributionRadius * sin(2 * CRadians::PI.GetValue() * (a/b));
 
-  // Generate angle in the range [Pi, 2*Pi] for the left half of the disk
-  Real angle = CRadians::PI.GetValue() * 0.75f + (CRadians::PI.GetValue() * 0.5f * a);
-
-  Real radius = b * m_fDistributionRadius;
-
-  Real fPosX = -radius * cos(angle);  // This will be negative or zero, for the left half of the disk
-  Real fPosY = radius * sin(angle);  // Y position
-
-  return CVector3(fPosY, fPosX, 0);
-
+  return CVector3(fPosX, fPosY, 0);
 }
 
 /****************************************/
@@ -551,8 +580,10 @@ void AACLoopFunction::GetParametersVector(const torch::nn::Module& module, std::
 
     // Iterate through all parameters and add their elements to the vector
     for (const auto& p : module.parameters()) {
-        auto p_data_ptr = p.data().view(-1).data_ptr<float>();
-        auto num_elements = p.numel();
+        // Ensure the tensor is on the CPU before accessing its data
+        auto p_cpu = p.data().view(-1).to(torch::kCPU);
+        auto p_data_ptr = p_cpu.data_ptr<float>();
+        auto num_elements = p_cpu.numel();
         for (int64_t i = 0; i < num_elements; ++i) {
             params_vector.push_back(p_data_ptr[i]);
         }
@@ -563,67 +594,69 @@ void AACLoopFunction::GetParametersVector(const torch::nn::Module& module, std::
 /****************************************/
 /****************************************/
 
-void AACLoopFunction::print_grid(at::Tensor grid){
-    // Get the size of the grid tensor
+void AACLoopFunction::print_grid(at::Tensor grid, int step) {
+    std::stringstream buffer;
+    buffer << "\033[2J\033[1;1H"; // Clear screen and move cursor to top-left
+    buffer << "GRID State:\n";
+    
     auto sizes = grid.sizes();
     int rows = sizes[0];
     int cols = sizes[1];
     int dimension = std::max(rows, cols);
-
+    
     // Calculate the scaling factors for rows and columns to achieve a square aspect ratio
     float scale_row = static_cast<float>(dimension) / rows;
     float scale_col = static_cast<float>(dimension) / cols;
-
+    
     // Print the grid with layout
     for (int y = 0; y < dimension; ++y) {
         if (y % int(scale_row) == 0) {
-            // Print the top and bottom grid borders
             for (int x = 0; x < dimension; ++x) {
-                std::cout << "+---";
+                buffer << "+---";
             }
-            std::cout << "+" << std::endl;
+            buffer << "+" << std::endl;
         }
-
+        
         for (int x = 0; x < dimension; ++x) {
             if (x % int(scale_col) == 0) {
-                std::cout << "|"; // Print the left grid border
+                buffer << "|";
             }
-
-            // Calculate the corresponding position in the original grid
+            
             int orig_x = static_cast<int>(x / scale_col);
             int orig_y = static_cast<int>(y / scale_row);
-
-            // Check if the current position is within the original grid bounds
+            
             if (orig_x < cols && orig_y < rows) {
                 float value = grid[orig_y][orig_x].item<float>();
-
-                // Print highlighted character if the value is 1, otherwise print a space
+                
                 if (value == 1) {
-                    std::cout << " R ";
-		} else if (value == 2){
-		    std::cout << " C ";
-		} else if (value == 3){
-                    std::cout << " B ";
+                    buffer << " R ";
+                } else if (value == 2) {
+                    buffer << " C ";
+                } else if (value == 3) {
+                    buffer << " B ";
                 } else {
-                    std::cout << "   ";
+                    buffer << "   ";
                 }
             } else {
-                std::cout << " "; // Print a space for out-of-bounds positions
+                buffer << "   "; // Ensure consistent grid cell size
             }
         }
-
-        if (y % int(scale_row) == 0) {
-            std::cout << "|" << std::endl; // Print the right grid border
-        } else {
-            std::cout << "|" << std::endl; // Print a separator for other rows
-        }
+        
+        buffer << "|\n"; // Complete the grid row
     }
-
+    
     // Print the bottom grid border
     for (int x = 0; x < dimension; ++x) {
-        std::cout << "+---";
+        buffer << "+---";
     }
-    std::cout << "+" << std::endl;
+    buffer << "+\n";
+    buffer << "Time: " << step * 0.1 << " seconds" << std::endl;
+    
+    // Print the entire grid at once
+    std::cout << buffer.str();
+    std::cout.flush(); // Ensure the output is rendered immediately
+    
+    usleep(100000); // Sleep for 0.1 seconds (100,000 microseconds)
 }
 
 void AACLoopFunction::SetTraining(bool value) {

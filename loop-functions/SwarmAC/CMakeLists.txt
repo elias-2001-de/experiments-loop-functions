@@ -1,4 +1,6 @@
 # Get the paths of libtorch
+message(${Torch_DIR} )
+
 find_package(Torch REQUIRED)
 # find cppzmq
 find_package(cppzmq)

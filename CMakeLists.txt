@@ -28,7 +28,6 @@ include(${CMAKE_SOURCE_DIR}/src/cmake/ARGoSBuildChecks.cmake)
 # Include boost and zmq
 include_directories(/home/igharbi/boost_1_82_0)
 
-
 #
 # Set base source files
 #

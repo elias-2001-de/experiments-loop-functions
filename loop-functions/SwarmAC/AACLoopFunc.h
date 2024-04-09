@@ -17,6 +17,10 @@
 #include <cmath>
 #include <unordered_map>
 
+#include <iostream>
+#include <unistd.h> 
+#include <sstream> 
+
 #include "../../src/CoreLoopFunctions.h"
 #include "../../../AC_trainer/src/shared_mem.h"
 #include "../../../argos3-nn/src/NNController.h"
@@ -40,6 +44,10 @@ class AACLoopFunction : public CoreLoopFunctions {
       virtual void PostExperiment();
 
       Real GetObjectiveFunction();
+      float GetTDError();
+      float GetCriticLoss();
+      float GetActorLoss();
+      float GetEntropy();
 
       virtual CColor GetFloorColor(const CVector2& c_position_on_plane);
 
@@ -49,7 +57,7 @@ class AACLoopFunction : public CoreLoopFunctions {
 
       void GetParametersVector(const torch::nn::Module& module, std::vector<float>& params_vector);
 
-      void print_grid(at::Tensor grid);
+      void print_grid(at::Tensor grid, int step);
 
       virtual void SetTraining(bool value);
 
@@ -86,7 +94,7 @@ class AACLoopFunction : public CoreLoopFunctions {
       int nb_robots;
 
       torch::Device device = torch::kCPU;
-
+    
       CRange<Real> m_cNeuralNetworkOutputRange;
       
       // Define the Actor and Critic Nets
@@ -120,12 +128,30 @@ class AACLoopFunction : public CoreLoopFunctions {
             return x;
         }
 
-            void print_last_layer_params() {
-                // Print parameters of the output layer
-                std::cout << "Weights of last layer:\n" << output_layer->weight << std::endl;
-                std::cout << "Bias of last layer:\n" << output_layer->bias << std::endl;
+        void print_last_layer_params() {
+            int i = 0;
+            for (auto& layer : hidden_layers) {
+                std::cout << "Weights of layer " << i << ":\n" << layer->weight << std::endl;
+                std::cout << "Weights of layer " << i << ":\n" << layer->bias << std::endl;
+                i++;
             }
-        };
+            // Print parameters of the output layer
+            std::cout << "Weights of last layer:\n" << output_layer->weight << std::endl;
+            std::cout << "Bias of last layer:\n" << output_layer->bias << std::endl;
+        }
+
+        void print_params() {
+            int i = 0;
+            for (auto& layer : hidden_layers) {
+                std::cout << "Weights of layer " << i << ":\n" << layer->weight << std::endl;
+                std::cout << "Weights of layer " << i << ":\n" << layer->bias << std::endl;
+                i++;
+            }
+            // Print parameters of the output layer
+            std::cout << "Weights of last layer:\n" << output_layer->weight << std::endl;
+            std::cout << "Bias of last layer:\n" << output_layer->bias << std::endl;
+        }
+      };
       Critic_Net critic_net; 
       argos::CEpuckNNController::Actor_Net actor_net;
 
@@ -147,11 +173,18 @@ class AACLoopFunction : public CoreLoopFunctions {
       float alpha_critic;
       float lambda_actor;
       float alpha_actor;
+      float entropy_fact;
 
       int64_t port; // TCP interprocess comunication port number for crtic (port+1 for the actor)
 
       std::shared_ptr<torch::optim::Optimizer> optimizer_actor;
       std::shared_ptr<torch::optim::Optimizer> optimizer_critic;
+
+      std::vector<float> TDerrors;
+      std::vector<float> Entropies;
+      std::vector<float> critic_losses;
+      std::vector<float> actor_losses;
+
 };
 
 #endif
