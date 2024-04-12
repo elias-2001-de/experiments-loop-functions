@@ -79,6 +79,38 @@ void AACLoopFunction::Reset() {
   actor_losses.resize(mission_lengh);
   std::fill(actor_losses.begin(), actor_losses.end(), 0.0f);
 
+  if(!training){
+    // Load up-to-date policy network
+    std::vector<float> actor;
+    m_policy->mutex.lock();
+    for(auto w : m_policy->vec){
+      actor.push_back(w);
+    }
+    m_policy->mutex.unlock();
+
+    // Update all parameters with values from the new_params vector
+    int index = 0;
+    for (auto& param : actor_net.parameters()) {
+      auto param_data = torch::from_blob(actor.data() + index, param.data().sizes()).clone();
+      param.data() = param_data;
+      index += param_data.numel();
+    }
+    
+    // Launch the experiment with the correct random seed and network,
+    // and evaluate the average fitness
+    CSpace::TMapPerType cEntities = GetSpace().GetEntitiesByType("controller");
+    for (CSpace::TMapPerType::iterator it = cEntities.begin();
+        it != cEntities.end(); ++it) {
+      CControllableEntity *pcEntity = any_cast<CControllableEntity *>(it->second);
+      try {
+        CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
+        cController.SetNetworkAndOptimizer(actor_net, optimizer_actor);
+      } catch (std::exception &ex) {
+        LOGERR << "Error while setting network: " << ex.what() << std::endl;
+      }
+    }
+  }
+
   CoreLoopFunctions::Reset();
 }
 
@@ -141,9 +173,9 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
   m_socket_critic.connect("tcp://localhost:" + std::to_string(port+1));
 
   if(actor_num_hidden_layers>0){
-    size_policy_net = (actor_input_dim*actor_hidden_dim+actor_hidden_dim) + (actor_num_hidden_layers-1)*(actor_hidden_dim*actor_hidden_dim+actor_hidden_dim) + (actor_hidden_dim*actor_output_dim+actor_output_dim);
+    size_policy_net = (actor_input_dim*actor_hidden_dim+actor_hidden_dim) + (actor_num_hidden_layers-1)*(actor_hidden_dim*actor_hidden_dim+actor_hidden_dim) + 2 * (actor_hidden_dim*actor_output_dim+actor_output_dim);
   }else{
-    size_policy_net = actor_input_dim*actor_output_dim + actor_output_dim;
+    size_policy_net = actor_input_dim*actor_output_dim + 2 * actor_output_dim;
   }
 
   if(critic_num_hidden_layers>0){
@@ -247,53 +279,56 @@ void AACLoopFunction::PreStep() {
     pos_index += 4;
   }
 
-  state = pos.clone();
+  if(training){
+    state = pos.clone();
 
-  // Load up-to-date value network
-  std::vector<float> critic;
-  m_value->mutex.lock();
-  for (auto w : m_value->vec) {
-      critic.push_back(w);
-  }
-  m_value->mutex.unlock();
+    // Load up-to-date value network
+    std::vector<float> critic;
+    m_value->mutex.lock();
+    for (auto w : m_value->vec) {
+        critic.push_back(w);
+    }
+    m_value->mutex.unlock();
 
-  // Update all parameters with values from the new_params vector
-  size_t index = 0;
-  for (auto& param : critic_net.parameters()) {
-	  auto param_data = torch::from_blob(critic.data() + index, param.data().sizes()).clone();
-	  param.data() = param_data;
-	  index += param_data.numel();
-  }
+    // Update all parameters with values from the new_params vector
+    size_t index = 0;
+    for (auto& param : critic_net.parameters()) {
+      auto param_data = torch::from_blob(critic.data() + index, param.data().sizes()).clone();
+      param.data() = param_data;
+      index += param_data.numel();
+    }
 
-  // Load up-to-date policy network
-  std::vector<float> actor;
-  m_policy->mutex.lock();
-  for(auto w : m_policy->vec){
-    actor.push_back(w);
-  }
-  m_policy->mutex.unlock();
+    // Load up-to-date policy network
+    std::vector<float> actor;
+    m_policy->mutex.lock();
+    for(auto w : m_policy->vec){
+      actor.push_back(w);
+    }
+    m_policy->mutex.unlock();
 
-  // Update all parameters with values from the new_params vector
-  index = 0;
-  for (auto& param : actor_net.parameters()) {
-	  auto param_data = torch::from_blob(actor.data() + index, param.data().sizes()).clone();
-	  param.data() = param_data;
-	  index += param_data.numel();
-  }
-   
-  // Launch the experiment with the correct random seed and network,
-  // and evaluate the average fitness
-  CSpace::TMapPerType cEntities = GetSpace().GetEntitiesByType("controller");
-  for (CSpace::TMapPerType::iterator it = cEntities.begin();
-       it != cEntities.end(); ++it) {
-    CControllableEntity *pcEntity = any_cast<CControllableEntity *>(it->second);
-    try {
-      CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
-      cController.SetNetworkAndOptimizer(actor_net, optimizer_actor);
-    } catch (std::exception &ex) {
-      LOGERR << "Error while setting network: " << ex.what() << std::endl;
+    // Update all parameters with values from the new_params vector
+    index = 0;
+    for (auto& param : actor_net.parameters()) {
+      auto param_data = torch::from_blob(actor.data() + index, param.data().sizes()).clone();
+      param.data() = param_data;
+      index += param_data.numel();
+    }
+    
+    // Launch the experiment with the correct random seed and network,
+    // and evaluate the average fitness
+    CSpace::TMapPerType cEntities = GetSpace().GetEntitiesByType("controller");
+    for (CSpace::TMapPerType::iterator it = cEntities.begin();
+        it != cEntities.end(); ++it) {
+      CControllableEntity *pcEntity = any_cast<CControllableEntity *>(it->second);
+      try {
+        CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
+        cController.SetNetworkAndOptimizer(actor_net, optimizer_actor);
+      } catch (std::exception &ex) {
+        LOGERR << "Error while setting network: " << ex.what() << std::endl;
+      }
     }
   }
+
 }
 
 /****************************************/
