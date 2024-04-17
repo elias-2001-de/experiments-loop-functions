@@ -6,7 +6,8 @@ link_directories(
 	${CMAKE_BINARY_DIR}/src
     )
 
-add_subdirectory(SwarmAC)
+add_subdirectory(comparisonChocolate)
+# add_subdirectory(SwarmAC)
 #add_subdirectory(visual-add-ons)
 # add_subdirectory(Repertoire)
 # add_subdirectory(vanilla)

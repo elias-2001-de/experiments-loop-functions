@@ -73,6 +73,8 @@ class CoreLoopFunctions: public CLoopFunctions {
      */
     virtual Real GetObjectiveFunction() = 0;
 
+    // virtual float GetTDError() = 0;
+
     /*
      * Return a random position.
      */
