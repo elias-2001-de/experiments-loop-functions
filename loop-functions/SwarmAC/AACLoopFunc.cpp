@@ -79,38 +79,6 @@ void AACLoopFunction::Reset() {
   actor_losses.resize(mission_lengh);
   std::fill(actor_losses.begin(), actor_losses.end(), 0.0f);
 
-  if(!training){
-    // Load up-to-date policy network
-    std::vector<float> actor;
-    m_policy->mutex.lock();
-    for(auto w : m_policy->vec){
-      actor.push_back(w);
-    }
-    m_policy->mutex.unlock();
-
-    // Update all parameters with values from the new_params vector
-    int index = 0;
-    for (auto& param : actor_net.parameters()) {
-      auto param_data = torch::from_blob(actor.data() + index, param.data().sizes()).clone();
-      param.data() = param_data;
-      index += param_data.numel();
-    }
-    
-    // Launch the experiment with the correct random seed and network,
-    // and evaluate the average fitness
-    CSpace::TMapPerType cEntities = GetSpace().GetEntitiesByType("controller");
-    for (CSpace::TMapPerType::iterator it = cEntities.begin();
-        it != cEntities.end(); ++it) {
-      CControllableEntity *pcEntity = any_cast<CControllableEntity *>(it->second);
-      try {
-        CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
-        cController.SetNetworkAndOptimizer(actor_net, optimizer_actor);
-      } catch (std::exception &ex) {
-        LOGERR << "Error while setting network: " << ex.what() << std::endl;
-      }
-    }
-  }
-
   CoreLoopFunctions::Reset();
 }
 
@@ -249,37 +217,230 @@ argos::CColor AACLoopFunction::GetFloorColor(const argos::CVector2& c_position_o
 /****************************************/
 
 void AACLoopFunction::PreStep() {
+  // std::cout << "\nPre step" << std::endl;
   at::Tensor grid = torch::zeros({50, 50});
   torch::Tensor pos = torch::empty({critic_input_dim});
   CSpace::TMapPerType& tEpuckMap = GetSpace().GetEntitiesByType("epuck");
   CVector2 cEpuckPosition(0,0);
   CQuaternion cEpuckOrientation;
   CRadians cRoll, cPitch, cYaw;
+  std::vector<float> rewards(nb_robots, 0);
   int pos_index = 0;
+  int i = 0;
   for (CSpace::TMapPerType::iterator it = tEpuckMap.begin(); it != tEpuckMap.end(); ++it) {
     CEPuckEntity* pcEpuck = any_cast<CEPuckEntity*>(it->second);
     cEpuckPosition.Set(pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetX(),
-                      pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetY());
-
+                       pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetY());
+                       
     cEpuckOrientation = pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Orientation;
     cEpuckOrientation.ToEulerAngles(cYaw, cPitch, cRoll);
-    
+
     // Scale the position to the grid size
     int grid_x = static_cast<int>(std::round((-cEpuckPosition.GetY() + 1.231) / 2.462 * 49));
     int grid_y = static_cast<int>(std::round((cEpuckPosition.GetX() + 1.231) / 2.462 * 49));
 
+    Real fDistanceSpot = (m_cCoordBlackSpot - cEpuckPosition).Length();
+    if (fDistanceSpot <= m_fRadius) {
+      rewards[i] = 1.0;
+    }else{
+      rewards[i] = std::pow(10, -3 * fDistanceSpot / m_fDistributionRadius);
+      // rewards[i] = std::pow(10, -5 * (fDistanceSpot - m_fRadius) / m_fDistributionRadius);
+      // rewards[i] = 0;
+    }
+    m_fObjectiveFunction += rewards[i];
+
     // Set the grid cell that corresponds to the epuck's position to 1
     grid[grid_x][grid_y] = 1;
 
-    // PART1: State is the position of the single agent
     pos = pos.index_put_({pos_index}, cEpuckPosition.GetX());
     pos = pos.index_put_({pos_index+1}, cEpuckPosition.GetY());
     pos = pos.index_put_({pos_index+2}, std::cos(cYaw.GetValue()));
     pos = pos.index_put_({pos_index+3}, std::sin(cYaw.GetValue()));
     pos_index += 4;
+    i++;
   }
+  
+  if (fTimeStep == 0)
+  {
+    state = pos.clone();
+    // std::cout << "state = " <<  state << std::endl;
 
-  if(training){
+    // Load up-to-date value network
+    std::vector<float> critic;
+    m_value->mutex.lock();
+    for (auto w : m_value->vec) {
+        critic.push_back(w);
+    }
+    m_value->mutex.unlock();
+
+    // Update all parameters with values from the new_params vector
+    size_t index = 0;
+    for (auto& param : critic_net.parameters()) {
+      auto param_data = torch::from_blob(critic.data() + index, param.data().sizes()).clone();
+      param.data() = param_data;
+      index += param_data.numel();
+    }
+
+    // Load up-to-date policy network
+    std::vector<float> actor;
+    m_policy->mutex.lock();
+    for(auto w : m_policy->vec){
+      actor.push_back(w);
+    }
+    m_policy->mutex.unlock();
+
+    // Update all parameters with values from the new_params vector
+    index = 0;
+    for (auto& param : actor_net.parameters()) {
+      auto param_data = torch::from_blob(actor.data() + index, param.data().sizes()).clone();
+      param.data() = param_data;
+      index += param_data.numel();
+    }
+    
+    // Launch the experiment with the correct random seed and network,
+    // and evaluate the average fitness
+    CSpace::TMapPerType cEntities = GetSpace().GetEntitiesByType("controller");
+    for (CSpace::TMapPerType::iterator it = cEntities.begin();
+        it != cEntities.end(); ++it) {
+      CControllableEntity *pcEntity = any_cast<CControllableEntity *>(it->second);
+      try {
+        CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
+        cController.SetNetworkAndOptimizer(actor_net, optimizer_actor);
+        cController.SetGlobalState(state);
+      } catch (std::exception &ex) {
+        LOGERR << "Error while setting network: " << ex.what() << std::endl;
+      }
+    }
+
+    fTimeStep += 1;
+  
+  }else
+  {
+    if (training) {
+      try{
+        state_prime = pos.clone();
+
+        state = state.to(device);
+        state_prime = state_prime.to(device);
+
+        // Forward passes
+        critic_net.to(device);
+        torch::Tensor v_state = critic_net.forward(state);
+        torch::Tensor v_state_prime = critic_net.forward(state_prime);
+        
+
+        // Adjust for the terminal state
+        if (fTimeStep + 1 == mission_lengh) {
+            v_state_prime = torch::zeros_like(v_state_prime);
+        }
+
+        // Global reward
+        float total_reward = std::accumulate(rewards.begin(), rewards.end(), 0.0f);
+        // LOG << "rewards = " <<  rewards << std::endl;
+        torch::Tensor total_reward_tensor = torch::tensor({total_reward}, torch::dtype(torch::kFloat32).device(device));
+
+        // TD error
+        torch::Tensor delta = total_reward_tensor + gamma * v_state_prime - v_state;
+
+        // std::cout << "state = " <<  state << std::endl;
+        // std::cout << "state_prime = " <<  state_prime << std::endl;
+        // std::cout << "v_state = " <<  v_state << std::endl;
+        // std::cout << "v_state_prime = " <<  v_state_prime << std::endl;
+        // std::cout << "total_reward_tensor = " <<  total_reward_tensor << std::endl;
+        // std::cout << "delta = " <<  delta << std::endl;
+
+        
+        TDerrors[fTimeStep] = delta.item<float>();
+
+        // Critic Loss
+        torch::Tensor critic_loss = delta.pow(2).mean();
+        // LOG << "critic_loss = " <<  critic_loss << std::endl;
+        critic_losses[fTimeStep] = critic_loss.item<float>();
+
+        // Backward and optimize for critic
+        optimizer_critic->zero_grad();
+        critic_loss.backward();
+        // Update eligibility traces and gradients
+        for (auto& named_param : critic_net.named_parameters()) {
+            auto& param = named_param.value();
+            if (param.grad().defined()) {
+                auto& eligibility = eligibility_trace_critic[named_param.key()];
+                eligibility.mul_(gamma * lambda_critic).add_(param.grad());
+                param.mutable_grad() = eligibility.clone();
+            }
+        }
+        optimizer_critic->step();
+
+        // Compute individual TD errors for policy loss calculation
+        torch::Tensor rewards_tensor = torch::tensor(rewards, torch::dtype(torch::kFloat32).device(device)).unsqueeze(1); // [nb_robots, 1]
+        torch::Tensor individual_delta = rewards_tensor + ((gamma * v_state_prime) - v_state)/nb_robots; // [nb_robots, 1]
+
+        // Prepare for policy update
+        std::vector<torch::Tensor> log_probs;
+        std::vector<torch::Tensor> entropies;
+        CSpace::TMapPerType cEntities = GetSpace().GetEntitiesByType("controller"); 
+        for (CSpace::TMapPerType::iterator it = cEntities.begin();
+            it != cEntities.end(); ++it) {
+          CControllableEntity *pcEntity = any_cast<CControllableEntity *>(it->second);      
+          CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
+          log_probs.push_back(cController.GetPolicyLogProbs().to(device)); 
+          entropies.push_back(cController.GetPolicyEntropy().to(device)); 
+        }
+
+        // Calculate policy loss using the per-robot TD error times the logprob
+        torch::Tensor policy_loss = -(torch::stack(log_probs) * individual_delta.detach()).sum(); // Sum of element-wise product
+        // LOG << "torch::stack(log_probs) = " <<  torch::stack(log_probs) << std::endl;
+        // LOG << "individual_delta = " <<  individual_delta << std::endl;
+        // LOG << "policy_loss (pre entropy) = " <<  policy_loss << std::endl;
+
+        // Add entropy term for better exploration
+        torch::Tensor entropy = torch::stack(entropies).sum();
+        policy_loss -= entropy_fact * entropy;
+        // LOG << "entropy = " <<  entropy << std::endl;
+        // LOG << "entropy_fact * entropy = " <<  entropy_fact * entropy << std::endl;
+        // LOG << "policy_loss: " << policy_loss << std::endl;
+        actor_losses[fTimeStep] = policy_loss.item<float>();
+        Entropies[fTimeStep] = entropy.item<float>();
+
+        // Backward and optimize for actor
+        actor_net.to(device);
+        optimizer_actor->zero_grad();
+        policy_loss.backward();
+        // Update eligibility traces and gradients
+        for (auto& named_param : actor_net.named_parameters()) {
+            auto& param = named_param.value();
+            if (param.grad().defined()) {
+                auto& eligibility = eligibility_trace_actor[named_param.key()];
+                eligibility.mul_(gamma * lambda_actor).add_(param.grad() * I);
+                param.mutable_grad() = eligibility.clone();
+            }
+            // std::cout << "actor " <<  named_param.key() << " grad: " << param.grad() << std::endl;
+        }
+        optimizer_actor->step();
+
+        I *= gamma; // Update the decay term for the eligibility traces
+      }catch (std::exception &ex) {
+        LOGERR << "Error in training loop: " << ex.what() << std::endl;
+      }
+      GetParametersVector(actor_net, policy_param);
+      GetParametersVector(critic_net, value_param);
+
+      // actor
+      // std::cout << "policy_param: " << policy_param << std::endl;
+      Data policy_data {policy_param};   
+      std::string serialized_data = serialize(policy_data);
+      zmq::message_t message(serialized_data.size());
+      memcpy(message.data(), serialized_data.c_str(), serialized_data.size());
+      m_socket_actor.send(message, zmq::send_flags::dontwait);
+      // critic
+      // std::cout << "value_param: " << value_param << std::endl;
+      Data value_data {value_param};   
+      serialized_data = serialize(value_data);
+      message.rebuild(serialized_data.size());
+      memcpy(message.data(), serialized_data.c_str(), serialized_data.size());
+      m_socket_critic.send(message, zmq::send_flags::dontwait);  
+    }
+    
     state = pos.clone();
 
     // Load up-to-date value network
@@ -323,169 +484,193 @@ void AACLoopFunction::PreStep() {
       try {
         CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
         cController.SetNetworkAndOptimizer(actor_net, optimizer_actor);
+        cController.SetGlobalState(state);
       } catch (std::exception &ex) {
         LOGERR << "Error while setting network: " << ex.what() << std::endl;
       }
     }
-  }
 
+    fTimeStep += 1;
+  
+  }
 }
 
 /****************************************/
 /****************************************/
 
 void AACLoopFunction::PostStep() {
-  at::Tensor grid = torch::zeros({50, 50});
-  torch::Tensor pos = torch::empty({critic_input_dim});
-  CSpace::TMapPerType& tEpuckMap = GetSpace().GetEntitiesByType("epuck");
-  CVector2 cEpuckPosition(0,0);
-  CQuaternion cEpuckOrientation;
-  CRadians cRoll, cPitch, cYaw;
-  std::vector<float> rewards(nb_robots, 0);
-  int pos_index = 0;
-  int i = 0;
-  for (CSpace::TMapPerType::iterator it = tEpuckMap.begin(); it != tEpuckMap.end(); ++it) {
-    CEPuckEntity* pcEpuck = any_cast<CEPuckEntity*>(it->second);
-    cEpuckPosition.Set(pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetX(),
-                       pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetY());
+  // std::cout << "Post step" << std::endl;
+  // at::Tensor grid = torch::zeros({50, 50});
+  // torch::Tensor pos = torch::empty({critic_input_dim});
+  // CSpace::TMapPerType& tEpuckMap = GetSpace().GetEntitiesByType("epuck");
+  // CVector2 cEpuckPosition(0,0);
+  // CQuaternion cEpuckOrientation;
+  // CRadians cRoll, cPitch, cYaw;
+  // std::vector<float> rewards(nb_robots, 0);
+  // int pos_index = 0;
+  // int i = 0;
+  // for (CSpace::TMapPerType::iterator it = tEpuckMap.begin(); it != tEpuckMap.end(); ++it) {
+  //   CEPuckEntity* pcEpuck = any_cast<CEPuckEntity*>(it->second);
+  //   cEpuckPosition.Set(pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetX(),
+  //                      pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetY());
                        
-    cEpuckOrientation = pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Orientation;
-    cEpuckOrientation.ToEulerAngles(cYaw, cPitch, cRoll);
+  //   cEpuckOrientation = pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Orientation;
+  //   cEpuckOrientation.ToEulerAngles(cYaw, cPitch, cRoll);
 
-    // Scale the position to the grid size
-    int grid_x = static_cast<int>(std::round((-cEpuckPosition.GetY() + 1.231) / 2.462 * 49));
-    int grid_y = static_cast<int>(std::round((cEpuckPosition.GetX() + 1.231) / 2.462 * 49));
+  //   // Scale the position to the grid size
+  //   int grid_x = static_cast<int>(std::round((-cEpuckPosition.GetY() + 1.231) / 2.462 * 49));
+  //   int grid_y = static_cast<int>(std::round((cEpuckPosition.GetX() + 1.231) / 2.462 * 49));
 
-    Real fDistanceSpot = (m_cCoordBlackSpot - cEpuckPosition).Length();
-    if (fDistanceSpot <= m_fRadius) {
-      rewards[i] = 1.0;
-    }else{
-      rewards[i] = std::pow(10, -3 * fDistanceSpot / m_fDistributionRadius);
-      // rewards[i] = 0;
-    }
-    m_fObjectiveFunction += rewards[i];
+  //   Real fDistanceSpot = (m_cCoordBlackSpot - cEpuckPosition).Length();
+  //   if (fDistanceSpot <= m_fRadius) {
+  //     rewards[i] = 1.0;
+  //   }else{
+  //     rewards[i] = std::pow(10, -3 * fDistanceSpot / m_fDistributionRadius);
+  //     // rewards[i] = std::pow(10, -5 * (fDistanceSpot - m_fRadius) / m_fDistributionRadius);
+  //     // rewards[i] = 0;
+  //   }
+  //   m_fObjectiveFunction += rewards[i];
 
-    // Set the grid cell that corresponds to the epuck's position to 1
-    grid[grid_x][grid_y] = 1;
+  //   // Set the grid cell that corresponds to the epuck's position to 1
+  //   grid[grid_x][grid_y] = 1;
 
-    pos = pos.index_put_({pos_index}, cEpuckPosition.GetX());
-    pos = pos.index_put_({pos_index+1}, cEpuckPosition.GetY());
-    pos = pos.index_put_({pos_index+2}, std::cos(cYaw.GetValue()));
-    pos = pos.index_put_({pos_index+3}, std::sin(cYaw.GetValue()));
-    pos_index += 4;
-    i++;
-  }
+  //   pos = pos.index_put_({pos_index}, cEpuckPosition.GetX());
+  //   std::cout << "Epuck x = " << pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetX() << std::endl;
+  //   LOG << "LOG Epuck x = " << pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetX() << std::endl;
+  //   pos = pos.index_put_({pos_index+1}, cEpuckPosition.GetY());
+  //   pos = pos.index_put_({pos_index+2}, std::cos(cYaw.GetValue()));
+  //   pos = pos.index_put_({pos_index+3}, std::sin(cYaw.GetValue()));
+  //   pos_index += 4;
+  //   i++;
+  // }
 
-  // Compute delta with Critic predictions
-  if (training) {
-    try{
-      state_prime = pos.clone();
+  // // Compute delta with Critic predictions
+  // if (training) {
+  //   try{
+  //     state_prime = pos.clone();
 
-      state = state.to(device);
-      state_prime = state_prime.to(device);
+  //     state = state.to(device);
+  //     state_prime = state_prime.to(device);
 
-      // Forward passes
-      critic_net.to(device);
-      torch::Tensor v_state = critic_net.forward(state);
-      torch::Tensor v_state_prime = critic_net.forward(state_prime);
+  //     // Forward passes
+  //     critic_net.to(device);
+  //     torch::Tensor v_state = critic_net.forward(state);
+  //     torch::Tensor v_state_prime = critic_net.forward(state_prime);
+      
 
-      // Adjust for the terminal state
-      if (fTimeStep + 1 == mission_lengh) {
-          v_state_prime = torch::zeros_like(v_state_prime);
-      }
+  //     // Adjust for the terminal state
+  //     if (fTimeStep + 1 == mission_lengh) {
+  //         v_state_prime = torch::zeros_like(v_state_prime);
+  //     }
 
-      // Global reward
-      float total_reward = std::accumulate(rewards.begin(), rewards.end(), 0.0f);
-      torch::Tensor total_reward_tensor = torch::tensor({total_reward}, torch::dtype(torch::kFloat32).device(device));
+  //     // Global reward
+  //     float total_reward = std::accumulate(rewards.begin(), rewards.end(), 0.0f);
+  //     // LOG << "rewards = " <<  rewards << std::endl;
+  //     torch::Tensor total_reward_tensor = torch::tensor({total_reward}, torch::dtype(torch::kFloat32).device(device));
 
-      // TD error
-      torch::Tensor delta = total_reward_tensor + gamma * v_state_prime - v_state;
-      TDerrors[fTimeStep] = delta.item<float>();
+  //     // TD error
+  //     torch::Tensor delta = total_reward_tensor + gamma * v_state_prime - v_state;
 
-      // Critic Loss
-      torch::Tensor critic_loss = delta.pow(2).mean();
-      critic_losses[fTimeStep] = critic_loss.item<float>();
+  //     std::cout << "state = " <<  state << std::endl;
+  //     std::cout << "state_prime = " <<  state_prime << std::endl;
+  //     std::cout << "v_state = " <<  v_state << std::endl;
+  //     std::cout << "v_state_prime = " <<  v_state_prime << std::endl;
+  //     std::cout << "total_reward_tensor = " <<  total_reward_tensor << std::endl;
+  //     std::cout << "delta = " <<  delta << std::endl;
 
-      // Backward and optimize for critic
-      optimizer_critic->zero_grad();
-      critic_loss.backward();
-      // Update eligibility traces and gradients
-      for (auto& named_param : critic_net.named_parameters()) {
-          auto& param = named_param.value();
-          if (param.grad().defined()) {
-              auto& eligibility = eligibility_trace_critic[named_param.key()];
-              eligibility.mul_(gamma * lambda_critic).add_(param.grad());
-              param.mutable_grad() = eligibility.clone();
-          }
-      }
-      optimizer_critic->step();
+      
+  //     TDerrors[fTimeStep] = delta.item<float>();
 
-      // Compute individual TD errors for policy loss calculation
-      torch::Tensor rewards_tensor = torch::tensor(rewards, torch::dtype(torch::kFloat32).device(device)).unsqueeze(1); // [nb_robots, 1]
-      torch::Tensor individual_delta = rewards_tensor + (gamma * v_state_prime - v_state)/nb_robots; // [nb_robots, 1]
+  //     // Critic Loss
+  //     torch::Tensor critic_loss = delta.pow(2).mean();
+  //     // LOG << "critic_loss = " <<  critic_loss << std::endl;
+  //     critic_losses[fTimeStep] = critic_loss.item<float>();
 
-      // Prepare for policy update
-      std::vector<torch::Tensor> log_probs;
-      std::vector<torch::Tensor> entropies;
-      CSpace::TMapPerType cEntities = GetSpace().GetEntitiesByType("controller"); 
-      for (CSpace::TMapPerType::iterator it = cEntities.begin();
-          it != cEntities.end(); ++it) {
-        CControllableEntity *pcEntity = any_cast<CControllableEntity *>(it->second);      
-        CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
-        log_probs.push_back(cController.GetPolicyLogProbs().to(device)); 
-        entropies.push_back(cController.GetPolicyEntropy().to(device)); 
-      }
+  //     // Backward and optimize for critic
+  //     optimizer_critic->zero_grad();
+  //     critic_loss.backward();
+  //     // Update eligibility traces and gradients
+  //     for (auto& named_param : critic_net.named_parameters()) {
+  //         auto& param = named_param.value();
+  //         if (param.grad().defined()) {
+  //             auto& eligibility = eligibility_trace_critic[named_param.key()];
+  //             eligibility.mul_(gamma * lambda_critic).add_(param.grad());
+  //             param.mutable_grad() = eligibility.clone();
+  //         }
+  //     }
+  //     optimizer_critic->step();
 
-      // Calculate policy loss using the per-robot TD error times the logprob
-      torch::Tensor policy_loss = -(torch::stack(log_probs) * individual_delta.detach()).sum(); // Sum of element-wise product
+  //     // Compute individual TD errors for policy loss calculation
+  //     torch::Tensor rewards_tensor = torch::tensor(rewards, torch::dtype(torch::kFloat32).device(device)).unsqueeze(1); // [nb_robots, 1]
+  //     torch::Tensor individual_delta = rewards_tensor + ((gamma * v_state_prime) - v_state)/nb_robots; // [nb_robots, 1]
 
-      // Add entropy term for better exploration
-      torch::Tensor entropy = torch::stack(entropies).sum();
-      policy_loss -= entropy_fact * entropy;
-      // std::cout << "policy_loss: " << policy_loss << std::endl;
-      actor_losses[fTimeStep] = policy_loss.item<float>();
-      Entropies[fTimeStep] = entropy.item<float>();
+  //     // Prepare for policy update
+  //     std::vector<torch::Tensor> log_probs;
+  //     std::vector<torch::Tensor> entropies;
+  //     CSpace::TMapPerType cEntities = GetSpace().GetEntitiesByType("controller"); 
+  //     for (CSpace::TMapPerType::iterator it = cEntities.begin();
+  //         it != cEntities.end(); ++it) {
+  //       CControllableEntity *pcEntity = any_cast<CControllableEntity *>(it->second);      
+  //       CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
+  //       log_probs.push_back(cController.GetPolicyLogProbs().to(device)); 
+  //       entropies.push_back(cController.GetPolicyEntropy().to(device)); 
+  //     }
 
-      // Backward and optimize for actor
-      actor_net.to(device);
-      optimizer_actor->zero_grad();
-      policy_loss.backward();
-      // Update eligibility traces and gradients
-      for (auto& named_param : actor_net.named_parameters()) {
-          auto& param = named_param.value();
-          if (param.grad().defined()) {
-              auto& eligibility = eligibility_trace_actor[named_param.key()];
-              eligibility.mul_(gamma * lambda_actor).add_(param.grad() * I);
-              param.mutable_grad() = eligibility.clone();
-          }
-          // std::cout << "actor " <<  named_param.key() << " grad: " << param.grad() << std::endl;
-      }
-      optimizer_actor->step();
+  //     // Calculate policy loss using the per-robot TD error times the logprob
+  //     torch::Tensor policy_loss = -(torch::stack(log_probs) * individual_delta.detach()).sum(); // Sum of element-wise product
+  //     // LOG << "torch::stack(log_probs) = " <<  torch::stack(log_probs) << std::endl;
+  //     // LOG << "individual_delta = " <<  individual_delta << std::endl;
+  //     // LOG << "policy_loss (pre entropy) = " <<  policy_loss << std::endl;
 
-      I *= gamma; // Update the decay term for the eligibility traces
-    }catch (std::exception &ex) {
-      LOGERR << "Error in training loop: " << ex.what() << std::endl;
-    }
-    GetParametersVector(actor_net, policy_param);
-    GetParametersVector(critic_net, value_param);
+  //     // Add entropy term for better exploration
+  //     torch::Tensor entropy = torch::stack(entropies).sum();
+  //     policy_loss -= entropy_fact * entropy;
+  //     // LOG << "entropy = " <<  entropy << std::endl;
+  //     // LOG << "entropy_fact * entropy = " <<  entropy_fact * entropy << std::endl;
+  //     // LOG << "policy_loss: " << policy_loss << std::endl;
+  //     actor_losses[fTimeStep] = policy_loss.item<float>();
+  //     Entropies[fTimeStep] = entropy.item<float>();
 
-    // actor
-    // std::cout << "policy_param: " << policy_param << std::endl;
-    Data policy_data {policy_param};   
-    std::string serialized_data = serialize(policy_data);
-    zmq::message_t message(serialized_data.size());
-    memcpy(message.data(), serialized_data.c_str(), serialized_data.size());
-    m_socket_actor.send(message, zmq::send_flags::dontwait);
-    // critic
-    // std::cout << "value_param: " << value_param << std::endl;
-    Data value_data {value_param};   
-    serialized_data = serialize(value_data);
-    message.rebuild(serialized_data.size());
-    memcpy(message.data(), serialized_data.c_str(), serialized_data.size());
-    m_socket_critic.send(message, zmq::send_flags::dontwait);  
-  }
+  //     // Backward and optimize for actor
+  //     actor_net.to(device);
+  //     optimizer_actor->zero_grad();
+  //     policy_loss.backward();
+  //     // Update eligibility traces and gradients
+  //     for (auto& named_param : actor_net.named_parameters()) {
+  //         auto& param = named_param.value();
+  //         if (param.grad().defined()) {
+  //             auto& eligibility = eligibility_trace_actor[named_param.key()];
+  //             eligibility.mul_(gamma * lambda_actor).add_(param.grad() * I);
+  //             param.mutable_grad() = eligibility.clone();
+  //         }
+  //         // std::cout << "actor " <<  named_param.key() << " grad: " << param.grad() << std::endl;
+  //     }
+  //     optimizer_actor->step();
 
-  fTimeStep += 1;
+  //     I *= gamma; // Update the decay term for the eligibility traces
+  //   }catch (std::exception &ex) {
+  //     LOGERR << "Error in training loop: " << ex.what() << std::endl;
+  //   }
+  //   GetParametersVector(actor_net, policy_param);
+  //   GetParametersVector(critic_net, value_param);
+
+  //   // actor
+  //   // std::cout << "policy_param: " << policy_param << std::endl;
+  //   Data policy_data {policy_param};   
+  //   std::string serialized_data = serialize(policy_data);
+  //   zmq::message_t message(serialized_data.size());
+  //   memcpy(message.data(), serialized_data.c_str(), serialized_data.size());
+  //   m_socket_actor.send(message, zmq::send_flags::dontwait);
+  //   // critic
+  //   // std::cout << "value_param: " << value_param << std::endl;
+  //   Data value_data {value_param};   
+  //   serialized_data = serialize(value_data);
+  //   message.rebuild(serialized_data.size());
+  //   memcpy(message.data(), serialized_data.c_str(), serialized_data.size());
+  //   m_socket_critic.send(message, zmq::send_flags::dontwait);  
+  // }
+
+  // fTimeStep += 1;
   // std::cout << "step: " << fTimeStep << std::endl;
 
   // if(!training){
