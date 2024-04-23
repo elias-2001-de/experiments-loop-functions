@@ -74,7 +74,7 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
 
 
   MADDPGLoopFunction::Init(t_tree);
-  //std::cout << "Before Init loop function" << "." << std::endl;
+  std::cout << "Before Init loop function" << "." << std::endl;
 
   //std::cout << "Size agents" << agents.size() << std::endl;
 
@@ -135,6 +135,7 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
 
   fTimeStep = 0;
   fTimeBatch = 0;
+  fTimeStepTraining = 0;
 
   SetControllerEpuckAgent();
 }
@@ -368,22 +369,26 @@ void AACLoopFunction::PostStep() {
 
       // Updqte of the target networks
       //std::cout << "Here" << std::endl;
-      for (int a=0; a<nb_robots; a++){
-          int target_params_size = static_cast<int>(agents.at(a)->target_critic.parameters().size());
-          for (int p = 0; p < target_params_size; p++) {
-              agents.at(a)->target_critic.parameters().at(p) = torch::mul(agents.at(a)->critic.parameters().at(p), tau) + torch::mul(agents.at(a)->target_critic.parameters().at(p), (1 - tau));
-              CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(agents.at(a)->pcEntity->GetController());
-              CEpuckNNController::Actor_Net* target_network = cController.GetTargetNetwork();
-              target_network->parameters().at(p) = torch::mul(agents.at(a)->actor.parameters().at(p), tau) + torch::mul(target_network->parameters().at(p), (1 - tau));
-          }
+      if (fTimeStepTraining % 100 == 0){
+        std::cout << "Here" << std::endl;
+        for (int a=0; a<nb_robots; a++){
+            int target_params_size = static_cast<int>(agents.at(a)->target_critic.parameters().size());
+            for (int p = 0; p < target_params_size; p++) {
+                agents.at(a)->target_critic.parameters().at(p) = torch::mul(agents.at(a)->critic.parameters().at(p), tau) + torch::mul(agents.at(a)->target_critic.parameters().at(p), (1 - tau));
+                CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(agents.at(a)->pcEntity->GetController());
+                CEpuckNNController::Actor_Net* target_network = cController.GetTargetNetwork();
+                target_network->parameters().at(p) = torch::mul(agents.at(a)->actor.parameters().at(p), tau) + torch::mul(target_network->parameters().at(p), (1 - tau));
+            }
+        }
       }
-    //std::cout << "step: " << fTimeStep << std::endl;
+    std::cout << "step: " << fTimeStep << std::endl;
     }else{
       fTimeBatch += 1;
       if (fTimeBatch == batch_step){
         fTimeBatch = 0;
       }
     }
+    fTimeStepTraining += 1;
   }
   fTimeStep += 1;
   obs = next_obs;

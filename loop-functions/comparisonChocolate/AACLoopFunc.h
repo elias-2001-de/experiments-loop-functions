@@ -80,6 +80,7 @@ class AACLoopFunction : public MADDPGLoopFunction {
       // Get the time step
       int fTimeStep;
       int mission_lengh;
+      int fTimeStepTraining;
 
       // Networks
       int critic_input_dim;
