@@ -89,12 +89,15 @@ class AACLoopFunction : public MADDPGLoopFunction {
       float gamma;
       float tau;
       int batch_size;
+      int batch_step;
+      int max_buffer_size;
 
       int size_value_net;
 
       int size_policy_net;
 
       bool training = true;
+      int fTimeBatch;
 
       torch::Device device = torch::kCPU;
 
