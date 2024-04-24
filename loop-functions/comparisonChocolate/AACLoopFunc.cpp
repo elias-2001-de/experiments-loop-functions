@@ -196,11 +196,9 @@ void AACLoopFunction::PreStep() {
 
 void AACLoopFunction::PostStep() {
   // Assuming that an action is composed of two floats (one for each wheel)
-  //std::cout << "Before poststep" << "." << std::endl;
   const int doubleNbRobots = 2*nb_robots;
   std::vector<MADDPGLoopFunction::Transition*> sample;
   sample.reserve(batch_size);  
-  torch::Tensor target_actions = torch::empty({doubleNbRobots});
   torch::Tensor actions = torch::empty({doubleNbRobots});
   torch::Tensor pos = torch::empty({4*nb_robots});
   std::vector<torch::Tensor> actions_trans;
@@ -211,7 +209,6 @@ void AACLoopFunction::PostStep() {
   std::vector<torch::Tensor> next_obs;
   int pos_index = 0;
   int i = 0;
-  //std::cout << "Before for agent" << "." << std::endl;  
   for (MADDPGLoopFunction::Agent* a : agents){
     cEpuckPosition.Set(a->pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetX(),
                        a->pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetY());
@@ -245,53 +242,37 @@ void AACLoopFunction::PostStep() {
     }
   }
 
-  //std::cout << "Time step " << fTimeStep << std::endl; 
   if (fTimeStep == 0){
-    //std::cout << "New state" << std::endl; 
     state = pos.clone();
     state_prime = pos.clone();
   }else {
     // Next_state after the step
     state_prime = pos.clone();
     // Need to add this transition to the buffer
-    //std::cout << "Size state in transition " << state.sizes() << std::endl;
     MADDPGLoopFunction::Transition* transition = new MADDPGLoopFunction::Transition(state, obs, actions_trans, rewards, state_prime, next_obs);
     buffer.push_back(transition); 
     if (buffer.size() > max_buffer_size){
-      //std::cout << "Elem buffer " << buffer.at(0) << std::endl; 
       delete buffer.at(0);
       buffer.at(0) = nullptr;
-      //std::cout << "Elem buffer " << buffer.at(0) << std::endl; 
       buffer.erase(std::remove(buffer.begin(), buffer.end(), nullptr), buffer.end());
     }
   }
 
   // Beginning of the learning loop if we are in training mode and there are enough samples in the buffer
   int buffer_size = static_cast<int>(buffer.size());
-  //std::cout << "buffer size" << buffer_size << std::endl;
-  //std::cout << "batch size" << batch_size << std::endl;
   if(training && buffer_size >= batch_size){ 
-    if(fTimeBatch == 0){
-      //std::cout << "In if training" << "." << std::endl;
-      //state = state.to(device);
-      //state_prime = state_prime.to(device);
-      //actions = actions.to(device);
-      //target_actions = target_actions.to(device);
-      
-      // Update on the networks for each agent
-      //std::cout << "Before for agents_size" << "." << std::endl;  
+    if(fTimeBatch == 0){ 
       for (int a=0; a < nb_robots; a++){
           //First, need to sample a certain number of transitions from the buffer
           std::random_device rd;
           std::mt19937 gen(rd());
           std::uniform_int_distribution<> dis(0, buffer_size - 1);
-          //TODO: chnager le 3
           for (int i = 0; i < batch_size; ++i) {
               int randomIndex = dis(gen);
               sample.push_back(buffer.at(randomIndex));
           }
 
-          //std::cout<< "Critic model update" << std::endl;
+          //Critic model update
           std::vector<torch::Tensor> states_vec, actions_vec, rewards_vec, next_states_vec, target_actions_vec;
           for (int j=0; j<sample.size(); j++){
               states_vec.push_back(sample.at(j)->state);
@@ -336,30 +317,30 @@ void AACLoopFunction::PostStep() {
           agents.at(a)->optimizer_critic->step();
 
 
-          //std::cout << "Policy model update" << std::endl;
-          torch::Tensor value_policy = torch::empty({sample.size()}); 
+          // Policy model update
+          torch::Tensor actions_batch_pupdate = torch::zeros({sample.size(), doubleNbRobots}); // Initialize tensor for storing actions from all robots
           for (int j = 0; j < sample.size(); j++) {
               int index = 0;
               for (int i = 0; i < nb_robots; i++) {
                   if (a == i) {
                       CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(agents.at(a)->pcEntity->GetController());
                       std::vector<torch::Tensor> actions_to_add = cController.Action(sample.at(j)->obs.at(a));
-                      actions = actions.index_put_({index}, actions_to_add.at(0));
-                      actions = actions.index_put_({index+1}, actions_to_add.at(1));
+                      actions_batch_pupdate[j][index] = actions_to_add.at(0);
+                      actions_batch_pupdate[j][index+1] = actions_to_add.at(1);
                   }
                   else {
-                      actions = actions.index_put_({index}, sample.at(j)->actions.at(i)[0]);
-                      actions = actions.index_put_({index+1}, sample.at(j)->actions.at(i)[1]);                    
+                      actions_batch_pupdate[j][index] = sample.at(j)->actions.at(i)[0];
+                      actions_batch_pupdate[j][index+1] = sample.at(j)->actions.at(i)[1];                    
                   }
                   index += 2;
               }
-              torch::Tensor input_critic = torch::cat({sample.at(j)->state, actions});
-
-              // Use of the critic network of the current agent
-              value_policy= value_policy.index_put_({j}, agents.at(a)->critic.forward(input_critic)[0]);
           }
+          torch::Tensor input_critic_pupdate = torch::cat({states_batch, actions_batch_pupdate}, 1); // Concatenate the states and actions
 
-          //Policy loss
+          // Use of the critic network of the current agent
+          torch::Tensor value_policy = agents.at(a)->critic.forward(input_critic_pupdate)[0];
+
+          // Policy loss
           torch::Tensor actor_loss = -torch::mean(value_policy);
 
           agents.at(a)->optimizer_actor->zero_grad();
@@ -367,10 +348,8 @@ void AACLoopFunction::PostStep() {
           agents.at(a)->optimizer_actor->step();
       }
 
-      // Updqte of the target networks
-      //std::cout << "Here" << std::endl;
+      // Update of the target networks
       if (fTimeStepTraining % 100 == 0){
-        std::cout << "Here" << std::endl;
         for (int a=0; a<nb_robots; a++){
             int target_params_size = static_cast<int>(agents.at(a)->target_critic.parameters().size());
             for (int p = 0; p < target_params_size; p++) {
@@ -381,7 +360,6 @@ void AACLoopFunction::PostStep() {
             }
         }
       }
-    std::cout << "step: " << fTimeStep << std::endl;
     }else{
       fTimeBatch += 1;
       if (fTimeBatch == batch_step){
