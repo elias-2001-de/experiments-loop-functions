@@ -162,8 +162,8 @@ class AACLoopFunction : public CoreLoopFunctions {
       std::vector<float> policy_param;
       float I;
 
-      torch::Tensor state = torch::empty({critic_input_dim});
-      torch::Tensor state_prime = torch::empty({critic_input_dim});
+      std::vector<torch::Tensor> states;
+      std::vector<torch::Tensor> states_prime;
 
       int size_value_net;
       int size_policy_net;

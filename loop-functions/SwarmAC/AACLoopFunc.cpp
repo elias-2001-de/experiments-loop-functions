@@ -99,7 +99,7 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
   criticParameters = GetNode(t_tree, "critic");
   
   GetNodeAttribute(criticParameters, "input_dim", critic_input_dim);
-  critic_input_dim *= nb_robots;
+  // critic_input_dim *= nb_robots;
   GetNodeAttribute(criticParameters, "hidden_dim", critic_hidden_dim);
   GetNodeAttribute(criticParameters, "num_hidden_layers", critic_num_hidden_layers);
   GetNodeAttribute(criticParameters, "output_dim", critic_output_dim);
@@ -168,6 +168,10 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
   value_param.resize(size_value_net);
   std::fill(value_param.begin(), value_param.end(), 0.0f);
 
+  // std::cout << "size_policy_net = " <<  size_policy_net << std::endl;
+  // std::cout << "size_value_net = " <<  size_value_net << std::endl;
+
+
   for (const auto& named_param : critic_net.named_parameters()) {
       if (named_param.value().requires_grad()) {
           eligibility_trace_critic[named_param.key()] = torch::zeros_like(named_param.value());
@@ -217,17 +221,15 @@ argos::CColor AACLoopFunction::GetFloorColor(const argos::CVector2& c_position_o
 /****************************************/
 
 void AACLoopFunction::PreStep() {
-  // std::cout << "\nPre step" << std::endl;
   at::Tensor grid = torch::zeros({50, 50});
-  torch::Tensor pos = torch::empty({critic_input_dim});
+  std::vector<torch::Tensor> positions;
   CSpace::TMapPerType& tEpuckMap = GetSpace().GetEntitiesByType("epuck");
   CVector2 cEpuckPosition(0,0);
   CQuaternion cEpuckOrientation;
   CRadians cRoll, cPitch, cYaw;
-  std::vector<float> rewards(nb_robots, 0);
-  int pos_index = 0;
-  int i = 0;
+  std::vector<torch::Tensor> rewards;
   for (CSpace::TMapPerType::iterator it = tEpuckMap.begin(); it != tEpuckMap.end(); ++it) {
+    torch::Tensor pos = torch::empty({critic_input_dim});
     CEPuckEntity* pcEpuck = any_cast<CEPuckEntity*>(it->second);
     cEpuckPosition.Set(pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetX(),
                        pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetY());
@@ -239,30 +241,37 @@ void AACLoopFunction::PreStep() {
     int grid_x = static_cast<int>(std::round((-cEpuckPosition.GetY() + 1.231) / 2.462 * 49));
     int grid_y = static_cast<int>(std::round((cEpuckPosition.GetX() + 1.231) / 2.462 * 49));
 
+    float reward = 0;
     Real fDistanceSpot = (m_cCoordBlackSpot - cEpuckPosition).Length();
     if (fDistanceSpot <= m_fRadius) {
-      rewards[i] = 1.0;
+      reward = 1.0;
     }else{
-      rewards[i] = std::pow(10, -3 * fDistanceSpot / m_fDistributionRadius);
+      reward = std::pow(10, -3 * fDistanceSpot / m_fDistributionRadius);
       // rewards[i] = std::pow(10, -5 * (fDistanceSpot - m_fRadius) / m_fDistributionRadius);
       // rewards[i] = 0;
     }
-    m_fObjectiveFunction += rewards[i];
+    rewards.push_back(torch::tensor(reward, torch::dtype(torch::kFloat32)));
+    m_fObjectiveFunction += reward;
 
     // Set the grid cell that corresponds to the epuck's position to 1
     grid[grid_x][grid_y] = 1;
 
-    pos = pos.index_put_({pos_index}, cEpuckPosition.GetX());
-    pos = pos.index_put_({pos_index+1}, cEpuckPosition.GetY());
-    pos = pos.index_put_({pos_index+2}, std::cos(cYaw.GetValue()));
-    pos = pos.index_put_({pos_index+3}, std::sin(cYaw.GetValue()));
-    pos_index += 4;
-    i++;
+    pos = pos.index_put_({0}, cEpuckPosition.GetX());
+    pos = pos.index_put_({1}, cEpuckPosition.GetY());
+    pos = pos.index_put_({2}, std::cos(cYaw.GetValue()));
+    pos = pos.index_put_({3}, std::sin(cYaw.GetValue()));
+
+    positions.push_back(pos);
   }
   
   if (fTimeStep == 0)
   {
-    state = pos.clone();
+    states.clear();
+    for (const auto& state : positions)
+    {
+      states.push_back(state.clone());
+    }
+    
     // std::cout << "state = " <<  state << std::endl;
 
     // Load up-to-date value network
@@ -307,8 +316,8 @@ void AACLoopFunction::PreStep() {
       try {
         CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
         cController.SetNetworkAndOptimizer(actor_net, optimizer_actor);
-        torch::Tensor individualState = state.slice(0, 0 + i, 4 + i);
-        cController.SetGlobalState(individualState);
+        // std::cout << "state " << i << " : " <<  states[i] << std::endl;
+        // cController.SetGlobalState(states[i]);
         i++;
       } catch (std::exception &ex) {
         LOGERR << "Error while setting network: " << ex.what() << std::endl;
@@ -316,20 +325,25 @@ void AACLoopFunction::PreStep() {
     }
 
     fTimeStep += 1;
+    // std::cout << "Step: " << fTimeStep << std::endl;
   
   }else
   {
     if (training) {
       try{
-        state_prime = pos.clone();
+        states_prime.clear();
+        for (const auto& state : positions)
+        {
+          states_prime.push_back(state.clone());
+        }
 
-        state = state.to(device);
-        state_prime = state_prime.to(device);
+        torch::Tensor state_batch = torch::stack(states).to(device);
+        torch::Tensor next_state_batch = torch::stack(states_prime).to(device);
 
         // Forward passes
         critic_net.to(device);
-        torch::Tensor v_state = critic_net.forward(state);
-        torch::Tensor v_state_prime = critic_net.forward(state_prime);
+        torch::Tensor v_state = critic_net.forward(state_batch);
+        torch::Tensor v_state_prime = critic_net.forward(next_state_batch);
         
 
         // Adjust for the terminal state
@@ -338,26 +352,25 @@ void AACLoopFunction::PreStep() {
         }
 
         // Global reward
-        float total_reward = std::accumulate(rewards.begin(), rewards.end(), 0.0f);
         // LOG << "rewards = " <<  rewards << std::endl;
-        torch::Tensor total_reward_tensor = torch::tensor({total_reward}, torch::dtype(torch::kFloat32).device(device));
 
         // TD error
-        torch::Tensor delta = total_reward_tensor + gamma * v_state_prime - v_state;
+        torch::Tensor reward_batch = torch::stack(rewards).unsqueeze(1);
+        torch::Tensor td_errors = reward_batch + gamma * v_state_prime - v_state;
 
-        // std::cout << "state = " <<  state << std::endl;
-        // std::cout << "state_prime = " <<  state_prime << std::endl;
+        // std::cout << "state_batch = " <<  state_batch << std::endl;
+        // std::cout << "next_state_batch = " <<  next_state_batch << std::endl;
         // std::cout << "v_state = " <<  v_state << std::endl;
         // std::cout << "v_state_prime = " <<  v_state_prime << std::endl;
-        // std::cout << "total_reward_tensor = " <<  total_reward_tensor << std::endl;
-        // std::cout << "delta = " <<  delta << std::endl;
+        // std::cout << "reward_batch = " <<  reward_batch << std::endl;
+        // std::cout << "td_errors = " <<  td_errors << std::endl;
 
         
-        TDerrors[fTimeStep] = delta.item<float>();
+        TDerrors[fTimeStep] = td_errors.mean().item<float>();
 
         // Critic Loss
-        torch::Tensor critic_loss = delta.pow(2).mean();
-        // LOG << "critic_loss = " <<  critic_loss << std::endl;
+        torch::Tensor critic_loss = td_errors.pow(2).mean();
+        // std::cout << "critic_loss = " <<  critic_loss << std::endl;
         critic_losses[fTimeStep] = critic_loss.item<float>();
 
         // Backward and optimize for critic
@@ -374,10 +387,6 @@ void AACLoopFunction::PreStep() {
         }
         optimizer_critic->step();
 
-        // Compute individual TD errors for policy loss calculation
-        torch::Tensor rewards_tensor = torch::tensor(rewards, torch::dtype(torch::kFloat32).device(device)).unsqueeze(1); // [nb_robots, 1]
-        torch::Tensor individual_delta = rewards_tensor + ((gamma * v_state_prime) - v_state)/nb_robots; // [nb_robots, 1]
-
         // Prepare for policy update
         std::vector<torch::Tensor> log_probs;
         std::vector<torch::Tensor> entropies;
@@ -389,21 +398,21 @@ void AACLoopFunction::PreStep() {
           log_probs.push_back(cController.GetPolicyLogProbs().to(device)); 
           entropies.push_back(cController.GetPolicyEntropy().to(device)); 
         }
+        // std::cout << "log_probs = " <<  log_probs << std::endl;
+        // std::cout << "entropies = " <<  entropies << std::endl;
 
         // Calculate policy loss using the per-robot TD error times the logprob
-        torch::Tensor policy_loss = -(torch::stack(log_probs) * individual_delta.detach()).sum(); // Sum of element-wise product
-        // LOG << "torch::stack(log_probs) = " <<  torch::stack(log_probs) << std::endl;
-        // LOG << "individual_delta = " <<  individual_delta << std::endl;
-        // LOG << "policy_loss (pre entropy) = " <<  policy_loss << std::endl;
+        torch::Tensor log_probs_batch = torch::stack(log_probs).unsqueeze(1);
+        torch::Tensor policy_loss = -(log_probs_batch * td_errors.detach()).mean();
 
         // Add entropy term for better exploration
-        torch::Tensor entropy = torch::stack(entropies).sum();
-        policy_loss -= entropy_fact * entropy;
-        // LOG << "entropy = " <<  entropy << std::endl;
-        // LOG << "entropy_fact * entropy = " <<  entropy_fact * entropy << std::endl;
-        // LOG << "policy_loss: " << policy_loss << std::endl;
+        torch::Tensor entropy_batch = torch::stack(entropies).unsqueeze(1);
+        policy_loss -= entropy_fact * entropy_batch.mean();
+        // std::cout << "log_probs_batch = " <<  log_probs_batch << std::endl;
+        // std::cout << "entropy_batch = " <<  entropy_batch << std::endl;
+        // std::cout << "policy_loss = " <<  policy_loss << std::endl;
         actor_losses[fTimeStep] = policy_loss.item<float>();
-        Entropies[fTimeStep] = entropy.item<float>();
+        Entropies[fTimeStep] = entropy_batch.mean().item<float>();
 
         // Backward and optimize for actor
         actor_net.to(device);
@@ -444,7 +453,11 @@ void AACLoopFunction::PreStep() {
       m_socket_critic.send(message, zmq::send_flags::dontwait);  
     }
     
-    state = pos.clone();
+    states.clear();
+    for (const auto& state : positions)
+    {
+      states.push_back(state.clone());
+    }
 
     // Load up-to-date value network
     std::vector<float> critic;
@@ -481,20 +494,23 @@ void AACLoopFunction::PreStep() {
     // Launch the experiment with the correct random seed and network,
     // and evaluate the average fitness
     CSpace::TMapPerType cEntities = GetSpace().GetEntitiesByType("controller");
+    int i = 0;
     for (CSpace::TMapPerType::iterator it = cEntities.begin();
         it != cEntities.end(); ++it) {
       CControllableEntity *pcEntity = any_cast<CControllableEntity *>(it->second);
       try {
         CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
         cController.SetNetworkAndOptimizer(actor_net, optimizer_actor);
-        //cController.SetGlobalState(state);
+        // std::cout << "state " << i << " : " <<  states[i] << std::endl;
+        // cController.SetGlobalState(states[i]);
+        i++;
       } catch (std::exception &ex) {
         LOGERR << "Error while setting network: " << ex.what() << std::endl;
       }
     }
 
     fTimeStep += 1;
-  
+    // std::cout << "Step: " << fTimeStep << std::endl;
   }
 }
 
