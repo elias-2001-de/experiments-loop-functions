@@ -49,18 +49,18 @@ void AACLoopFunction::Reset() {
 
   for (const auto& named_param : critic_net.named_parameters()) {
       if (named_param.value().requires_grad()) {
-          eligibility_trace_critic[named_param.key()] = torch::zeros_like(named_param.value());
+          eligibility_trace_critic[named_param.key()] = torch::zeros_like(named_param.value()).to(device);
       }
   }
 
   for (const auto& named_param : actor_net.named_parameters()) {
       if (named_param.value().requires_grad()) {
-          eligibility_trace_actor[named_param.key()] = torch::zeros_like(named_param.value());
+          eligibility_trace_actor[named_param.key()] = torch::zeros_like(named_param.value()).to(device);
       }
   }
     
-  critic_net.to(torch::kCPU);
-  actor_net.to(torch::kCPU);
+  critic_net.to(device);
+  actor_net.to(device);
 
   optimizer_critic->zero_grad();
   optimizer_actor->zero_grad();
@@ -106,6 +106,8 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
   GetNodeAttribute(criticParameters, "lambda_critic", lambda_critic);
   GetNodeAttribute(criticParameters, "alpha_critic", alpha_critic);
   GetNodeAttribute(criticParameters, "gamma", gamma);
+  GetNodeAttribute(criticParameters, "device", device_type);
+  device = (device_type == "cuda") ? torch::kCUDA : torch::kCPU;
   GetNodeAttribute(criticParameters, "port", port);
 
   TConfigurationNode actorParameters;
@@ -155,8 +157,8 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
   critic_net = Critic_Net(critic_input_dim, critic_hidden_dim, critic_num_hidden_layers, critic_output_dim);
   actor_net = argos::CEpuckNNController::Actor_Net(actor_input_dim, actor_hidden_dim, actor_num_hidden_layers, actor_output_dim);
 
-  critic_net.to(torch::kCPU);
-  actor_net.to(torch::kCPU);
+  critic_net.to(device);
+  actor_net.to(device);
 
   optimizer_actor = std::make_shared<torch::optim::Adam>(actor_net.parameters(), torch::optim::AdamOptions(alpha_critic));
   optimizer_actor->zero_grad();
@@ -174,13 +176,13 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
 
   for (const auto& named_param : critic_net.named_parameters()) {
       if (named_param.value().requires_grad()) {
-          eligibility_trace_critic[named_param.key()] = torch::zeros_like(named_param.value());
+          eligibility_trace_critic[named_param.key()] = torch::zeros_like(named_param.value()).to(device);
       }
   }
 
   for (const auto& named_param : actor_net.named_parameters()) {
       if (named_param.value().requires_grad()) {
-          eligibility_trace_actor[named_param.key()] = torch::zeros_like(named_param.value());
+          eligibility_trace_actor[named_param.key()] = torch::zeros_like(named_param.value()).to(device);
       }
   }
 
@@ -221,6 +223,7 @@ argos::CColor AACLoopFunction::GetFloorColor(const argos::CVector2& c_position_o
 /****************************************/
 
 void AACLoopFunction::PreStep() {
+  // std::cout << "Pre Step\n";
   at::Tensor grid = torch::zeros({50, 50});
   std::vector<torch::Tensor> positions;
   CSpace::TMapPerType& tEpuckMap = GetSpace().GetEntitiesByType("epuck");
@@ -315,7 +318,7 @@ void AACLoopFunction::PreStep() {
       CControllableEntity *pcEntity = any_cast<CControllableEntity *>(it->second);
       try {
         CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
-        cController.SetNetworkAndOptimizer(actor_net, optimizer_actor);
+        cController.SetNetworkAndOptimizer(actor_net, optimizer_actor, device_type);
         // std::cout << "state " << i << " : " <<  states[i] << std::endl;
         // cController.SetGlobalState(states[i]);
         i++;
@@ -355,7 +358,7 @@ void AACLoopFunction::PreStep() {
         // LOG << "rewards = " <<  rewards << std::endl;
 
         // TD error
-        torch::Tensor reward_batch = torch::stack(rewards).unsqueeze(1);
+        torch::Tensor reward_batch = torch::stack(rewards).unsqueeze(1).to(device);
         torch::Tensor td_errors = reward_batch + gamma * v_state_prime - v_state;
 
         // std::cout << "state_batch = " <<  state_batch << std::endl;
@@ -500,7 +503,7 @@ void AACLoopFunction::PreStep() {
       CControllableEntity *pcEntity = any_cast<CControllableEntity *>(it->second);
       try {
         CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
-        cController.SetNetworkAndOptimizer(actor_net, optimizer_actor);
+        cController.SetNetworkAndOptimizer(actor_net, optimizer_actor, device_type);
         // std::cout << "state " << i << " : " <<  states[i] << std::endl;
         // cController.SetGlobalState(states[i]);
         i++;
@@ -510,7 +513,6 @@ void AACLoopFunction::PreStep() {
     }
 
     fTimeStep += 1;
-    // std::cout << "Step: " << fTimeStep << std::endl;
   }
 }
 
@@ -541,6 +543,7 @@ void AACLoopFunction::PostStep() {
   //   grid[grid_x][grid_y+radius] = temp4;
   //   grid[grid_x][grid_y-radius] = temp5;
   // }
+  // std::cout << "Step: " << fTimeStep << std::endl;
 }
 
 /****************************************/

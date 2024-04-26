@@ -93,7 +93,8 @@ class AACLoopFunction : public CoreLoopFunctions {
 
       int nb_robots;
 
-      torch::Device device = torch::kCPU;
+      std::string device_type = "cuda"; 
+      torch::Device device = torch::kCUDA;
     
       CRange<Real> m_cNeuralNetworkOutputRange;
       
