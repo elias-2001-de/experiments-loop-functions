@@ -382,7 +382,7 @@ void AACLoopFunction::PostStep() {
 
       // Update of the target networks
       //TODO: Change 1000 and put it in the argos file
-      if (fTimeStepTraining % 1000 == 0){
+      if (fTimeStepTraining % 100 == 0){
         for (int a=0; a<nb_robots; a++){
             int target_params_size = static_cast<int>(agents.at(a)->target_critic.parameters().size());
             for (int p = 0; p < target_params_size; p++) {
