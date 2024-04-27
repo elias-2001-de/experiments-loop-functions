@@ -8,12 +8,12 @@
   * @license MIT License
   */
 
-#include "AACLoopFunc.h"
+#include "AACLoopFuncNewObj.h"
 
 /****************************************/
 /****************************************/
 
-AACLoopFunction::AACLoopFunction() {
+AACLoopFunctionNewObj::AACLoopFunctionNewObj() {
   m_fRadius = 0.6;
   m_cCoordBlackSpot = CVector2(0,-0.6);
   //m_cCoordWhiteSpot = CVector2(0,0.6);
@@ -25,17 +25,17 @@ AACLoopFunction::AACLoopFunction() {
 /****************************************/
 /****************************************/
 
-AACLoopFunction::AACLoopFunction(const AACLoopFunction& orig) {}
+AACLoopFunctionNewObj::AACLoopFunctionNewObj(const AACLoopFunctionNewObj& orig) {}
 
 /****************************************/
 /****************************************/
 
-AACLoopFunction::~AACLoopFunction() {}
+AACLoopFunctionNewObj::~AACLoopFunctionNewObj() {}
 
 /****************************************/
 /****************************************/
 
-void AACLoopFunction::Destroy() {
+void AACLoopFunctionNewObj::Destroy() {
   //std::cout << "Before Destroy" << "." << std::endl;
   agents.clear();
   //RemoveArena();
@@ -44,7 +44,7 @@ void AACLoopFunction::Destroy() {
 /****************************************/
 /****************************************/
 
-void AACLoopFunction::Reset() {
+void AACLoopFunctionNewObj::Reset() {
   //std::cout << "In the reset part" << std::endl;
   m_fObjectiveFunction = 0;
   fTimeStep = 0;
@@ -63,7 +63,7 @@ void AACLoopFunction::Reset() {
 /****************************************/
 /****************************************/
 
-void AACLoopFunction::Init(TConfigurationNode& t_tree) {
+void AACLoopFunctionNewObj::Init(TConfigurationNode& t_tree) {
 
   int actor_hidden_dim;
   int actor_num_hidden_layers;
@@ -144,7 +144,7 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
   buffer.resize(max_buffer_size);
 }
 
-void AACLoopFunction::SetControllerEpuckAgent() {
+void AACLoopFunctionNewObj::SetControllerEpuckAgent() {
   //std::cout << "Before SetControllerEpuckAgent()" << "." << std::endl;
   int i = 0;
 
@@ -174,7 +174,7 @@ void AACLoopFunction::SetControllerEpuckAgent() {
 /****************************************/
 /****************************************/
 
-argos::CColor AACLoopFunction::GetFloorColor(const argos::CVector2& c_position_on_plane) {
+argos::CColor AACLoopFunctionNewObj::GetFloorColor(const argos::CVector2& c_position_on_plane) {
   CVector2 vCurrentPoint(c_position_on_plane.GetX(), c_position_on_plane.GetY());
   Real d = (m_cCoordBlackSpot - vCurrentPoint).Length();
   if (d <= m_fRadius) {
@@ -192,13 +192,13 @@ argos::CColor AACLoopFunction::GetFloorColor(const argos::CVector2& c_position_o
 /****************************************/
 /****************************************/
 
-void AACLoopFunction::PreStep() {
+void AACLoopFunctionNewObj::PreStep() {
 }
 
 /****************************************/
 /****************************************/
 
-void AACLoopFunction::PostStep() {
+void AACLoopFunctionNewObj::PostStep() {
   // Create an ofstream object for output
   //std::ofstream outfile;
   //outfile.open("debug_info.txt", std::ios_base::app); // append instead of overwrite
@@ -228,13 +228,15 @@ void AACLoopFunction::PostStep() {
     pos = pos.index_put_({pos_index+3}, std::sin(cYaw.GetValue()));
     pos_index += 4;
 
-
     Real fDistanceSpot = (m_cCoordBlackSpot - cEpuckPosition).Length();
     if (fDistanceSpot <= m_fRadius) {
       m_fObjectiveFunction += 1;
       rewards[i] = 1;
-    }else{
+    }else if (fDistanceSpot <= m_fRadius + 0.6){
       rewards[i] = 0;
+    }else{
+      rewards[i] = -1;
+      m_fObjectiveFunction -= 1;
     }
 
     // Get observations that the robots have after the step
@@ -408,7 +410,7 @@ void AACLoopFunction::PostStep() {
 /****************************************/
 /****************************************/
 
-void AACLoopFunction::PostExperiment() {
+void AACLoopFunctionNewObj::PostExperiment() {
   std::ofstream outfile;
   outfile.open("debug_weights.txt", std::ios_base::app); // append instead of overwrite
   LOG << "Time = " << fTimeStep << std::endl;
@@ -421,14 +423,14 @@ void AACLoopFunction::PostExperiment() {
 /****************************************/
 /****************************************/
 
-Real AACLoopFunction::GetObjectiveFunction() {
+Real AACLoopFunctionNewObj::GetObjectiveFunction() {
   return m_fObjectiveFunction;
 }
 
 /****************************************/
 /****************************************/
 
-CVector3 AACLoopFunction::GetRandomPosition() {
+CVector3 AACLoopFunctionNewObj::GetRandomPosition() {
 
   // Generate angle in range [Pi, 2*Pi] for the left half of the disk
   Real a = m_pcRng->Uniform(CRange<Real>(0.0f, 1.0f));
@@ -450,7 +452,7 @@ CVector3 AACLoopFunction::GetRandomPosition() {
 /****************************************/
 
 // Function to compute the log-PDF of the Beta distribution
-double AACLoopFunction::computeBetaLogPDF(double alpha, double beta, double x) {
+double AACLoopFunctionNewObj::computeBetaLogPDF(double alpha, double beta, double x) {
     // Compute the logarithm of the Beta function
     double logBeta = std::lgamma(alpha) + std::lgamma(beta) - std::lgamma(alpha + beta);
 
@@ -466,7 +468,7 @@ double AACLoopFunction::computeBetaLogPDF(double alpha, double beta, double x) {
 // Assuming actor_net is your Actor Neural Network (an instance of torch::nn::Module)
 // Assuming behavior_probs, beta_parameters, chosen_behavior, chosen_parameter, and td_error are already computed
 
-void AACLoopFunction::update_actor(torch::nn::Module actor_net, torch::Tensor& behavior_probs, 
+void AACLoopFunctionNewObj::update_actor(torch::nn::Module actor_net, torch::Tensor& behavior_probs, 
                   torch::Tensor& beta_parameters, int chosen_behavior, 
                   double chosen_parameter, double td_error, 
                   torch::optim::Adam* optimizer) {
@@ -498,7 +500,7 @@ void AACLoopFunction::update_actor(torch::nn::Module actor_net, torch::Tensor& b
 /****************************************/
 /****************************************/
 
-void AACLoopFunction::print_grid(at::Tensor grid){
+void AACLoopFunctionNewObj::print_grid(at::Tensor grid){
     // Get the size of the grid tensor
     auto sizes = grid.sizes();
     int rows = sizes[0];
@@ -561,38 +563,38 @@ void AACLoopFunction::print_grid(at::Tensor grid){
     std::cout << "+" << std::endl;
 }
 
-void AACLoopFunction::SetTraining(bool value) {
+void AACLoopFunctionNewObj::SetTraining(bool value) {
     training = value;
 }
 
-void AACLoopFunction::SetVectorAgents(std::vector<MADDPGLoopFunction::Agent*> vectorAgents) {
+void AACLoopFunctionNewObj::SetVectorAgents(std::vector<MADDPGLoopFunction::Agent*> vectorAgents) {
     agents = vectorAgents;
 }
 
-void AACLoopFunction::SetSizeValueNet(int value) {
+void AACLoopFunctionNewObj::SetSizeValueNet(int value) {
     size_value_net = value;
 }
 
-void AACLoopFunction::SetSizePolicyNet(int policy) {
+void AACLoopFunctionNewObj::SetSizePolicyNet(int policy) {
     size_policy_net = policy;
 }
 
-void AACLoopFunction::RemoveArena() {
+void AACLoopFunctionNewObj::RemoveArena() {
     std::ostringstream id;
     id << "arena";
     RemoveEntity(id.str().c_str());
 }
 
-float AACLoopFunction::GetCriticLoss() {
+float AACLoopFunctionNewObj::GetCriticLoss() {
   std::cout << "Critic losses: " << critic_losses << std::endl;
   float average = critic_losses / fTimeStepTraining;
   return average;
 }
 
-float AACLoopFunction::GetActorLoss() {
+float AACLoopFunctionNewObj::GetActorLoss() {
   float average = actor_losses / fTimeStepTraining;
   return average;
 }
 
 
-REGISTER_LOOP_FUNCTIONS(AACLoopFunction, "aac_loop_functions");
+REGISTER_LOOP_FUNCTIONS(AACLoopFunctionNewObj, "aac_loop_functions_newobj");

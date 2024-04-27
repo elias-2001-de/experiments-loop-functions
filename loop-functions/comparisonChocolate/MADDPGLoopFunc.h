@@ -45,13 +45,20 @@ class MADDPGLoopFunction : public CoreLoopFunctions {
             if(num_hidden_layers > 0){
                 for (int64_t i = 0; i < num_hidden_layers; ++i) {
                     int64_t in_features = i == 0 ? input_dim : hidden_dim;
+                    auto layer = torch::nn::Linear(in_features, hidden_dim);
+                    layer->to(torch::kFloat);
+                    torch::nn::init::xavier_uniform_(layer->weight);
                     hidden_layers.push_back(register_module("fc" + std::to_string(i+1), torch::nn::Linear(in_features, hidden_dim)));
                 }
 
                 // Create output layer
                 output_layer = register_module("fc" + std::to_string(num_hidden_layers + 1), torch::nn::Linear(hidden_dim, output_dim));
+                output_layer->to(torch::kFloat);
+                torch::nn::init::xavier_uniform_(output_layer->weight);
             }else{
                 output_layer = register_module("fc", torch::nn::Linear(input_dim, output_dim));
+                output_layer->to(torch::kFloat);
+                torch::nn::init::xavier_uniform_(output_layer->weight);
             }
         }
 
@@ -101,20 +108,6 @@ class MADDPGLoopFunction : public CoreLoopFunctions {
             std::fill(policy_param.begin(), policy_param.end(), 0.0f);
             value_param.resize(size_value_net);
             std::fill(value_param.begin(), value_param.end(), 0.0f);
-
-            //Initialisation of the parameters of the networks
-            size_t index = 0;
-            for (auto& param : critic.parameters()) {
-	            auto param_data = torch::from_blob(value_param.data() + index, param.data().sizes()).clone();
-	            param.data() = param_data;
-                index += param_data.numel();
-            }
-            index = 0;
-            for (auto& param : actor.parameters()) {
-	            auto param_data = torch::from_blob(policy_param.data() + index, param.data().sizes()).clone();
-	            param.data() = param_data;
-                index += param_data.numel();
-            }
             target_critic = critic;
             //std::cout << "After creation of a new agent" << "." << std::endl;
         }
@@ -141,8 +134,6 @@ class MADDPGLoopFunction : public CoreLoopFunctions {
 
       virtual void SetVectorAgents(std::vector<Agent*> vectorAgents) {}
 
-      virtual void SetBuffer(std::vector<Transition*> vectorTransitions) {}
-
       virtual void SetTraining(bool value) {}
 
       virtual void SetSizeValueNet(int size_value_net) {}
@@ -151,5 +142,90 @@ class MADDPGLoopFunction : public CoreLoopFunctions {
 
       virtual void SetControllerEpuckAgent() {}
 
+      virtual float GetActorLoss() {}
+
+      virtual float GetCriticLoss() {}
+
+};
+
+template <class T>
+class CircularBuffer {
+public:
+    CircularBuffer() :
+        max_size(0),
+        start(0),
+        end(0),
+        full(false) {}
+
+    void resize(size_t new_size) {
+        max_size = new_size;
+        buffer.resize(new_size);
+        // Reset start, end, and full
+        start = 0;
+        end = 0;
+        full = false;
+    }
+
+    void push(T item) {
+        buffer[end] = item;
+        if (full) {
+            start = next(start);
+        }
+        end = next(end);
+        full = start == end;
+    }
+
+    T pop() {
+        if (empty()) {
+            throw std::underflow_error("Buffer is empty");
+        }
+        T val = buffer[start];
+        full = false;
+        start = next(start);
+        return val;
+    }
+
+    T& at(size_t index) {
+        if (index >= max_size) {
+            throw std::out_of_range("Index out of range");
+        }
+        return buffer[(start + index) % max_size];
+    }
+
+
+    bool empty() const {
+        return !full && (start == end);
+    }
+
+    bool is_full() const {
+        return full;
+    }
+
+    size_t capacity() const {
+        return max_size;
+    }
+
+    size_t size() const {
+        size_t size = max_size;
+        if (!full) {
+            if (end >= start) {
+                size = end - start;
+            } else {
+                size = max_size + end - start;
+            }
+        }
+        return size;
+    }
+
+private:
+    std::vector<T> buffer;
+    size_t max_size;
+    size_t start;
+    size_t end;
+    bool full;
+
+    size_t next(size_t current) {
+        return (current + 1) % max_size;
+    }
 };
 #endif

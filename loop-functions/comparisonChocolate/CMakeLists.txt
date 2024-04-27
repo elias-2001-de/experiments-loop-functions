@@ -5,6 +5,8 @@ add_library(comparison_loopfunc SHARED
                           MADDPGLoopFunc.h
                           AACLoopFunc.h
                           AACLoopFunc.cpp
+                          AACLoopFuncNewObj.h
+                          AACLoopFuncNewObj.cpp
                           ${LOOP_HEADERS}
                           ${LOOP_SOURCES})
 

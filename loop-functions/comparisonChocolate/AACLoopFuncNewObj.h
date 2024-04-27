@@ -24,12 +24,12 @@
 
 using namespace argos;
 
-class AACLoopFunction : public MADDPGLoopFunction {
+class AACLoopFunctionNewObj : public MADDPGLoopFunction {
 
    public:
-      AACLoopFunction();
-      AACLoopFunction(const AACLoopFunction& orig);
-      virtual ~AACLoopFunction();
+      AACLoopFunctionNewObj();
+      AACLoopFunctionNewObj(const AACLoopFunctionNewObj& orig);
+      virtual ~AACLoopFunctionNewObj();
 
       virtual void Destroy();
       virtual void Init(TConfigurationNode& t_tree);
