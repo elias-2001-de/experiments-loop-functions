@@ -224,45 +224,73 @@ argos::CColor AACLoopFunction::GetFloorColor(const argos::CVector2& c_position_o
 
 void AACLoopFunction::PreStep() {
   // std::cout << "Pre Step\n";
+  int N = (critic_input_dim - 4)/5; // Number of closest neighbors to consider (4 absolute states + 5 relative states)
   at::Tensor grid = torch::zeros({50, 50});
   std::vector<torch::Tensor> positions;
   CSpace::TMapPerType& tEpuckMap = GetSpace().GetEntitiesByType("epuck");
   CVector2 cEpuckPosition(0,0);
-  CQuaternion cEpuckOrientation;
-  CRadians cRoll, cPitch, cYaw;
+  CRadians cRoll, cPitch, cYaw, other_yaw;
   std::vector<torch::Tensor> rewards;
+
   for (CSpace::TMapPerType::iterator it = tEpuckMap.begin(); it != tEpuckMap.end(); ++it) {
-    torch::Tensor pos = torch::empty({critic_input_dim});
     CEPuckEntity* pcEpuck = any_cast<CEPuckEntity*>(it->second);
     cEpuckPosition.Set(pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetX(),
                        pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetY());
                        
-    cEpuckOrientation = pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Orientation;
-    cEpuckOrientation.ToEulerAngles(cYaw, cPitch, cRoll);
+    pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Orientation.ToEulerAngles(cYaw, cPitch, cRoll);
 
-    // Scale the position to the grid size
-    int grid_x = static_cast<int>(std::round((-cEpuckPosition.GetY() + 1.231) / 2.462 * 49));
-    int grid_y = static_cast<int>(std::round((cEpuckPosition.GetX() + 1.231) / 2.462 * 49));
+    // Collect positions and orientations of other e-pucks
+    std::vector<std::pair<CVector2, CRadians>> all_positions;
+    CVector2 other_position(0,0);
+    CQuaternion cEpuckOrientation;
+    for (CSpace::TMapPerType::iterator jt = tEpuckMap.begin(); jt != tEpuckMap.end(); ++jt) {
+      if (jt != it) {
+        CEPuckEntity* pcOtherEpuck = any_cast<CEPuckEntity*>(jt->second);
+        other_position.Set(pcOtherEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetX(),
+                           pcOtherEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetY());
 
-    float reward = 0;
+        pcOtherEpuck->GetEmbodiedEntity().GetOriginAnchor().Orientation.ToEulerAngles(other_yaw, cPitch, cRoll);
+        all_positions.emplace_back(other_position, other_yaw);
+      }
+    }
+
+    // Compute relative positions and orientations
+    std::vector<RelativePosition> relatives = compute_relative_positions(cEpuckPosition, cYaw, all_positions);
+
+    // Sort by distance and pick the N closest
+    std::nth_element(relatives.begin(), relatives.begin() + N, relatives.end(), [](const RelativePosition& a, const RelativePosition& b) {
+      return a.distance < b.distance;
+    });
+    relatives.resize(N);  // Keep only the N closest
+
+    // Create state tensor for the current e-puck
+    torch::Tensor pos = torch::empty({critic_input_dim});
+    pos[0] = cEpuckPosition.GetX();
+    pos[1] = cEpuckPosition.GetY();
+    pos[2] = std::cos(cYaw.GetValue());
+    pos[3] = std::sin(cYaw.GetValue());
+    int index = 4;
+    for (const auto& rel : relatives) {
+      pos[index++] = rel.distance;
+      pos[index++] = std::cos(rel.angle);
+      pos[index++] = std::sin(rel.angle);
+      pos[index++] = std::cos(rel.relative_yaw);
+      pos[index++] = std::sin(rel.relative_yaw);
+    }
+
+    // Reward computation and grid update
+    float reward = 0.0;
     Real fDistanceSpot = (m_cCoordBlackSpot - cEpuckPosition).Length();
     if (fDistanceSpot <= m_fRadius) {
       reward = 1.0;
-    }else{
+    } else {
       reward = std::pow(10, -3 * fDistanceSpot / m_fDistributionRadius);
-      // rewards[i] = std::pow(10, -5 * (fDistanceSpot - m_fRadius) / m_fDistributionRadius);
-      // rewards[i] = 0;
     }
-    rewards.push_back(torch::tensor(reward, torch::dtype(torch::kFloat32)));
+    rewards.push_back(torch::tensor(reward));
     m_fObjectiveFunction += reward;
-
-    // Set the grid cell that corresponds to the epuck's position to 1
+    int grid_x = static_cast<int>(std::round((-cEpuckPosition.GetY() + 1.231) / 2.462 * 49));
+    int grid_y = static_cast<int>(std::round((cEpuckPosition.GetX() + 1.231) / 2.462 * 49));
     grid[grid_x][grid_y] = 1;
-
-    pos = pos.index_put_({0}, cEpuckPosition.GetX());
-    pos = pos.index_put_({1}, cEpuckPosition.GetY());
-    pos = pos.index_put_({2}, std::cos(cYaw.GetValue()));
-    pos = pos.index_put_({3}, std::sin(cYaw.GetValue()));
 
     positions.push_back(pos);
   }
@@ -596,6 +624,24 @@ float AACLoopFunction::GetCriticLoss() {
   float sum = std::accumulate(critic_losses.begin(), critic_losses.end(), 0.0f);
   float average = sum / critic_losses.size();
   return average;
+}
+
+
+/****************************************/
+/****************************************/
+
+std::vector<RelativePosition> AACLoopFunction::compute_relative_positions(const CVector2& base_position, const CRadians& base_yaw, const std::vector<std::pair<CVector2, CRadians>>& all_positions) {
+  std::vector<RelativePosition> relative_positions;
+  for (const auto& pos : all_positions) {
+    float dx = pos.first.GetX() - base_position.GetX();
+    float dy = pos.first.GetY() - base_position.GetY();
+    float distance = std::sqrt(dx * dx + dy * dy);
+    float angle = std::atan2(dy, dx) - base_yaw.GetValue();
+    float relative_yaw = pos.second.GetValue() - base_yaw.GetValue();
+
+    relative_positions.emplace_back(distance, angle, relative_yaw);
+  }
+  return relative_positions;
 }
 
 

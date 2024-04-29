@@ -27,6 +27,18 @@
 
 #include <typeinfo>
 
+struct RelativePosition {
+    float distance;
+    float angle;
+    float relative_yaw;
+
+    // Default constructor
+    RelativePosition() : distance(0), angle(0), relative_yaw(0) {}
+
+    // Constructor with parameters
+    RelativePosition(float d, float a, float ry) : distance(d), angle(a), relative_yaw(ry) {}
+};
+
 using namespace argos;
 
 class AACLoopFunction : public CoreLoopFunctions {
@@ -48,6 +60,8 @@ class AACLoopFunction : public CoreLoopFunctions {
       float GetCriticLoss();
       float GetActorLoss();
       float GetEntropy();
+
+      std::vector<RelativePosition> compute_relative_positions(const CVector2& base_position, const CRadians& base_yaw, const std::vector<std::pair<CVector2, CRadians>>& all_positions);
 
       virtual CColor GetFloorColor(const CVector2& c_position_on_plane);
 
