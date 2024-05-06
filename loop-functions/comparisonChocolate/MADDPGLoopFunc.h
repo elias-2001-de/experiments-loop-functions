@@ -21,6 +21,9 @@
 
 #include <random>
 
+#include <chrono>
+#include <iostream>
+
 using namespace argos;
 
 class MADDPGLoopFunction : public CoreLoopFunctions {
@@ -86,6 +89,7 @@ class MADDPGLoopFunction : public CoreLoopFunctions {
         CControllableEntity* pcEntity;
         Critic_Net critic;
         argos::CEpuckNNController::Actor_Net actor;
+        argos::CEpuckNNController::Actor_Net target_actor;
         Critic_Net target_critic;
         torch::optim::Adam* optimizer_critic;
         torch::optim::Adam* optimizer_actor;
@@ -97,9 +101,10 @@ class MADDPGLoopFunction : public CoreLoopFunctions {
             //std::cout << "Before creation of a new agent" << "." << std::endl;
             pcEpuck = nullptr;
             pcEntity = nullptr;
-            //std::cout << "Critic input dim" << critic_input_dim << std::endl;
+            std::cout << "Critic input dim" << critic_input_dim << std::endl;
             critic = Critic_Net(critic_input_dim, critic_hidden_dim, critic_num_hidden_layers, critic_output_dim);
             actor = argos::CEpuckNNController::Actor_Net(actor_input_dim, actor_hidden_dim, actor_num_hidden_layers, actor_output_dim);
+            target_actor =  argos::CEpuckNNController::Actor_Net(actor_input_dim, actor_hidden_dim, actor_num_hidden_layers, actor_output_dim);
             optimizer_actor = new torch::optim::Adam(actor.parameters(), torch::optim::AdamOptions(lambda_actor));
             optimizer_actor->zero_grad();
             optimizer_critic = new torch::optim::Adam(critic.parameters(), torch::optim::AdamOptions(lambda_critic));
@@ -108,7 +113,7 @@ class MADDPGLoopFunction : public CoreLoopFunctions {
             std::fill(policy_param.begin(), policy_param.end(), 0.0f);
             value_param.resize(size_value_net);
             std::fill(value_param.begin(), value_param.end(), 0.0f);
-            target_critic = critic;
+            target_critic = Critic_Net(critic_input_dim, critic_hidden_dim, critic_num_hidden_layers, critic_output_dim);
             //std::cout << "After creation of a new agent" << "." << std::endl;
         }
       };
@@ -145,6 +150,8 @@ class MADDPGLoopFunction : public CoreLoopFunctions {
       virtual float GetActorLoss() {}
 
       virtual float GetCriticLoss() {}
+
+      virtual float GetEntropy() {}
 
 };
 

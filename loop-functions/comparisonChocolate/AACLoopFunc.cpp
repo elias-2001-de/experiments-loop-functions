@@ -20,6 +20,7 @@ AACLoopFunction::AACLoopFunction() {
   m_fObjectiveFunction = 0;
   critic_losses = 0;
   actor_losses = 0;
+  entropies = 0.0;
 }
 
 /****************************************/
@@ -56,6 +57,7 @@ void AACLoopFunction::Reset() {
 
   critic_losses = 0.0;
   actor_losses = 0.0;
+  entropies = 0.0;
 
   MADDPGLoopFunction::Reset();
 }
@@ -90,6 +92,7 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
   GetNodeAttribute(cParametersNode, "batch_size", batch_size);
   GetNodeAttribute(cParametersNode, "batch_begin", batch_begin);
   GetNodeAttribute(cParametersNode, "batch_step", batch_step);
+  GetNodeAttribute(cParametersNode, "update_target", update_target);
   GetNodeAttribute(cParametersNode, "gamma", gamma);
   GetNodeAttribute(cParametersNode, "tau", tau);
 
@@ -165,7 +168,7 @@ void AACLoopFunction::SetControllerEpuckAgent() {
     //std::cout << "Before per agent" << "." << std::endl;
     CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
     cController.SetNetworkAndOptimizer(agents.at(i)->actor, agents.at(i)->optimizer_actor);
-    cController.SetTargetNetwork(agents.at(i)->actor);
+    cController.SetTargetNetwork(agents.at(i)->target_actor);
     agents.at(i)->pcEntity = pcEntity;
     i += 1;
   }
@@ -193,15 +196,25 @@ argos::CColor AACLoopFunction::GetFloorColor(const argos::CVector2& c_position_o
 /****************************************/
 
 void AACLoopFunction::PreStep() {
+    //auto end_time = std::chrono::high_resolution_clock::now();
+    //auto elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
+    //auto now_in_time_t = std::chrono::system_clock::to_time_t(start_time);
+    //std::cout << "Start time before pre step: " << std::ctime(&now_in_time_t) << " milliseconds" << std::endl;
+    //std::cout << "Elapsed time between post and pre: " << elapsed_time << " milliseconds" << std::endl;
+    //start_time = std::chrono::high_resolution_clock::now();
+    //now_in_time_t = std::chrono::system_clock::to_time_t(start_time);
+    //std::cout << "Start time after pre step: " << std::ctime(&now_in_time_t) << " milliseconds" << std::endl;
 }
 
 /****************************************/
 /****************************************/
 
 void AACLoopFunction::PostStep() {
+  
   // Create an ofstream object for output
-  //std::ofstream outfile;
-  //outfile.open("debug_info.txt", std::ios_base::app); // append instead of overwrite
+  //torch::autograd::AnomalyMode::set_enabled(true);
+  std::ofstream outfile;
+  outfile.open("debug_losses.txt", std::ios_base::app); // append instead of overwrite
   // Assuming that an action is composed of two floats (one for each wheel)
   const int doubleNbRobots = 2*nb_robots;
   std::vector<MADDPGLoopFunction::Transition*> sample;
@@ -238,6 +251,7 @@ void AACLoopFunction::PostStep() {
     }
 
     // Get observations that the robots have after the step
+    //std::cout << "Before dynamic cast" << fTimeStepTraining << std::endl;
     CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(a->pcEntity->GetController());
     if (fTimeStep == 0){
       obs.push_back(cController.Observe());
@@ -265,6 +279,7 @@ void AACLoopFunction::PostStep() {
   }
 
   // Beginning of the learning loop if we are in training mode and there are enough samples in the buffer
+  //std::cout << "Before learning" << std::endl;
   int buffer_size = static_cast<int>(buffer.size());
   if(training && buffer_size >= batch_begin){ 
     if(fTimeStepTraining % batch_step == 0){ 
@@ -273,14 +288,15 @@ void AACLoopFunction::PostStep() {
           std::random_device rd;
           std::mt19937 gen(rd());
           std::uniform_int_distribution<> dis(0, buffer_size - 1);
+          //std::cout << "Before loop buffer" << std::endl;
           for (int i = 0; i < batch_size; ++i) {
               int randomIndex = dis(gen);
               sample.push_back(buffer.at(randomIndex));
           }
-          //std::cout << "Step learning: " << fTimeStepTraining << std::endl;
 
 
           //Critic model update
+          //std::cout << "Before critic update" << std::endl;
           std::vector<torch::Tensor> states_vec, actions_vec, rewards_vec, next_states_vec, target_actions_vec;
           for (int j=0; j<sample.size(); j++){
               states_vec.push_back(sample.at(j)->state);
@@ -292,10 +308,8 @@ void AACLoopFunction::PostStep() {
               std::vector<torch::Tensor> target_actions_to_add;
               for (int i = 0; i < nb_robots; i++) {
                   CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(agents.at(i)->pcEntity->GetController());
-                  std::vector<torch::Tensor> vec_actions = cController.TargetAction(sample.at(j)->next_obs.at(i));
-                  for (auto& action : vec_actions) {
-                      target_actions_to_add.push_back(action.unsqueeze(0)); // Add a new dimension to the action tensor
-                  }
+                  torch::Tensor action = cController.TargetAction(sample.at(j)->obs.at(i));
+                  target_actions_to_add.push_back(action); // Add a new dimension to the action tensor
               }
               target_actions_vec.push_back(torch::cat(target_actions_to_add, 0)); // Concatenate the target action tensors            
           }
@@ -303,36 +317,42 @@ void AACLoopFunction::PostStep() {
           //outfile << "States vector size: " << states_vec.size() << std::endl;
           //outfile << "States vector: " << states_vec << std::endl;
           //outfile << "Actions vector size: " << actions_vec.size() << std::endl;
-          //outfile << "Actions vector: " << actions_vec << std::endl;
+          //std::cout << "Actions vector: " << actions_vec << std::endl;
           // Convert vectors to tensors 
           torch::Tensor states_batch = torch::stack(states_vec, 0);
           torch::Tensor actions_batch = torch::stack(actions_vec, 0); // This will now have actions from all robots
           torch::Tensor rewards_batch = torch::stack(rewards_vec, 0);
+          //outfile << "Rewards batch: " << rewards_batch << std::endl;
           torch::Tensor next_states_batch = torch::stack(next_states_vec, 0);
           torch::Tensor target_actions_batch = torch::stack(target_actions_vec, 0); // This will now have target actions for all samples
           
           // Calculate critic value without detaching
           torch::Tensor input_critic = torch::cat({states_batch, actions_batch}, 1);
           torch::Tensor critic_value = agents.at(a)->critic.forward(input_critic);
-          for (auto& layer : agents.at(a)->critic.hidden_layers) {
+          //for (auto& layer : agents.at(a)->critic.hidden_layers) {
                 //outfile << "Weights layer: " << layer->weight << std::endl;
-          }
+          //}
           //outfile << "Weights last layer: " << agents.at(a)->critic.output_layer->weight << std::endl;
-          //outfile << "Critic value: " << critic_value << std::endl;
+          outfile << "Critic value: " << critic_value << std::endl;
           //outfile << "Wrong critic value: " << critic_value[0] << std::endl;
 
           // Calculate y for each transition in the sample
           torch::Tensor input_target_critic = torch::cat({next_states_batch, target_actions_batch}, 1);
           input_target_critic = input_target_critic.toType(torch::kFloat32); // Convert to float
+          //torch::Tensor target_output = agents.at(a)->target_critic.forward(input_target_critic);
+          outfile << "Target Q-value: " << target_output << std::endl;
+          //outfile << "Weights target critic network:\n" << agents.at(a)->target_critic.parameters() << std::endl;
           torch::Tensor y = rewards_batch + gamma * agents.at(a)->target_critic.forward(input_target_critic);
-          //outfile << "Y value: " << y << std::endl;
+          outfile << "Y value: " << y << std::endl;
+
+          outfile << "Q-value: " << critic_value << std::endl;
 
           // Calculate loss
           torch::Tensor squared_diff = torch::pow(y - critic_value, 2);
           torch::Tensor mse = torch::mean(squared_diff);
+          outfile << "Critic loss: " << mse << std::endl;
 
           critic_losses += mse.item<float>();
-          //std::cout << "MSE: " << mse << std::endl;
 
 
           // Calculate gradient of loss
@@ -343,8 +363,11 @@ void AACLoopFunction::PostStep() {
           agents.at(a)->optimizer_critic->step();
 
           //outfile << "Weights after update:\n" << agents.at(a)->critic.parameters() << std::endl;
+          //CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(agents.at(a)->pcEntity->GetController());
+          //entropies += cController.GetPolicyEntropy();
+          //outfile << "Weights target actor network:\n" << cController.GetTargetNetwork()->parameters() << std::endl;
 
-
+          //std::cout << "Before policy update" << std::endl;
           // Policy model update
           torch::Tensor actions_batch_pupdate = torch::zeros({sample.size(), doubleNbRobots}); // Initialize tensor for storing actions from all robots
           for (int j = 0; j < sample.size(); j++) {
@@ -352,9 +375,9 @@ void AACLoopFunction::PostStep() {
               for (int i = 0; i < nb_robots; i++) {
                   if (a == i) {
                       CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(agents.at(a)->pcEntity->GetController());
-                      std::vector<torch::Tensor> actions_to_add = cController.Action(sample.at(j)->obs.at(a));
-                      actions_batch_pupdate[j][index] = actions_to_add.at(0);
-                      actions_batch_pupdate[j][index+1] = actions_to_add.at(1);
+                      torch::Tensor actions_to_add = cController.Action(sample.at(j)->obs.at(a));
+                      actions_batch_pupdate[j][index] = actions_to_add[0];
+                      actions_batch_pupdate[j][index+1] = actions_to_add[1];
                   }
                   else {
                       actions_batch_pupdate[j][index] = sample.at(j)->actions.at(i)[0];
@@ -373,7 +396,7 @@ void AACLoopFunction::PostStep() {
           torch::Tensor actor_loss = -torch::mean(value_policy);
 
           actor_losses += actor_loss.item<float>();
-          //std::cout << "Actor loss: " << actor_loss << std::endl;
+          outfile << "Actor loss: " << actor_loss << std::endl;
 
           agents.at(a)->optimizer_actor->zero_grad();
           actor_loss.backward();
@@ -382,16 +405,27 @@ void AACLoopFunction::PostStep() {
 
       // Update of the target networks
       //TODO: Change 1000 and put it in the argos file
-      if (fTimeStepTraining % 100 == 0){
+      if (fTimeStepTraining % update_target == 0){
+        //std::cout << "Target update" << std::endl;
         for (int a=0; a<nb_robots; a++){
-            int target_params_size = static_cast<int>(agents.at(a)->target_critic.parameters().size());
-            for (int p = 0; p < target_params_size; p++) {
-                agents.at(a)->target_critic.parameters().at(p) = torch::mul(agents.at(a)->critic.parameters().at(p), tau) + torch::mul(agents.at(a)->target_critic.parameters().at(p), (1 - tau));
+            for (size_t i = 0; i < agents.at(a)->critic.parameters().size(); ++i) {
+                // Get the parameters of the critic and target critic networks
+                torch::Tensor critic_param = agents.at(a)->critic.parameters()[i];
+                torch::Tensor target_critic_param = agents.at(a)->target_critic.parameters()[i];
+
+                // Perform the soft update
+                target_critic_param.data().copy_(tau * critic_param.data() + (1.0 - tau) * target_critic_param.data());
+            }
+            for (size_t i = 0; i < agents.at(a)->actor.parameters().size(); ++i) {
+                // Get the parameters of the actor and target actor networks
+                torch::Tensor actor_param = agents.at(a)->actor.parameters()[i];
                 CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(agents.at(a)->pcEntity->GetController());
                 CEpuckNNController::Actor_Net* target_network = cController.GetTargetNetwork();
-                target_network->parameters().at(p) = torch::mul(agents.at(a)->actor.parameters().at(p), tau) + torch::mul(target_network->parameters().at(p), (1 - tau));
+                torch::Tensor target_actor_param = target_network->parameters()[i];
+
+                // Perform the soft update
+                target_actor_param.data().copy_(tau * actor_param.data() + (1.0 - tau) * target_actor_param.data());
             }
-            //outfile << "Target critic parameters: " << agents.at(a)->target_critic.parameters().at(0) << std::endl;
         }
         
       }
@@ -403,19 +437,29 @@ void AACLoopFunction::PostStep() {
   state = state_prime;
   //std::cout << "Fin de post-step" << std::endl;
   //outfile.close();
+  //auto end_time = std::chrono::high_resolution_clock::now();
+  //auto elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
+  //auto now_in_time_t = std::chrono::system_clock::to_time_t(start_time);
+  //std::cout << "Start time before post step: " << std::ctime(&now_in_time_t) << " milliseconds" << std::endl;
+  //std::cout << "Elapsed time between pre and post: " << elapsed_time << " milliseconds" << std::endl;
+  //start_time = std::chrono::high_resolution_clock::now();
+  //now_in_time_t = std::chrono::system_clock::to_time_t(start_time);
+  //std::cout << "Start time after post step: " << std::ctime(&now_in_time_t) << " milliseconds" << std::endl;
 }
 
 /****************************************/
 /****************************************/
 
 void AACLoopFunction::PostExperiment() {
-  std::ofstream outfile;
-  outfile.open("debug_weights.txt", std::ios_base::app); // append instead of overwrite
+  //std::ofstream outfile;
+  //outfile.open("debug_weights.txt", std::ios_base::app); // append instead of overwrite
   LOG << "Time = " << fTimeStep << std::endl;
   LOG << "Score = " << m_fObjectiveFunction << std::endl;
-  std::cout << "NB transitions in buffer " << buffer.size() << std::endl;
-  outfile << "Critic weights: "  << agents.at(0)->critic.parameters() << std::endl;
-  outfile << "Actor weights: "  << agents.at(0)->actor.parameters() << std::endl;
+  fEpisode += 1;
+  outfile << "Next episode: " << fEpisode << std::endl;
+  //std::cout << "NB transitions in buffer " << buffer.size() << std::endl;
+  //outfile << "Critic weights: "  << agents.at(0)->critic.parameters() << std::endl;
+  //outfile << "Actor weights: "  << agents.at(0)->actor.parameters() << std::endl;
 }
 
 /****************************************/
@@ -594,5 +638,10 @@ float AACLoopFunction::GetActorLoss() {
   return average;
 }
 
+float AACLoopFunction::GetEntropy(){
+  std::cout << "Entropies: " << entropies << std::endl;
+  float average = entropies / fTimeStepTraining;
+  return average;
+}
 
 REGISTER_LOOP_FUNCTIONS(AACLoopFunction, "aac_loop_functions");

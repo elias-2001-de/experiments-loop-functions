@@ -21,6 +21,7 @@
 #include <typeinfo>
 
 #include <random>
+#include <ctime>
 
 using namespace argos;
 
@@ -45,6 +46,8 @@ class AACLoopFunction : public MADDPGLoopFunction {
       float GetCriticLoss();
 
       float GetActorLoss();
+
+      float GetEntropy();
 
       virtual CColor GetFloorColor(const CVector2& c_position_on_plane);
 
@@ -95,6 +98,7 @@ class AACLoopFunction : public MADDPGLoopFunction {
       int batch_size;
       int batch_begin;
       int batch_step;
+      int update_target;
       int max_buffer_size;
 
       int size_value_net;
@@ -103,6 +107,9 @@ class AACLoopFunction : public MADDPGLoopFunction {
 
       bool training = true;
       int fTimeBatch;
+      int fEpisode = 0;
+
+      std::chrono::time_point<std::chrono::high_resolution_clock> start_time = std::chrono::high_resolution_clock::now();;
 
       torch::Device device = torch::kCPU;
 
@@ -119,5 +126,6 @@ class AACLoopFunction : public MADDPGLoopFunction {
 
       float critic_losses = 0.0;
       float actor_losses = 0.0;
+      float entropies = 0.0;
 };
 #endif
