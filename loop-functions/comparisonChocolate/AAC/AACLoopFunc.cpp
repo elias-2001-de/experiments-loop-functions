@@ -14,10 +14,13 @@
 /****************************************/
 
 AACLoopFunction::AACLoopFunction() {
-  m_fRadius = 0.6;
+  m_fRadius = 0.3;
   m_cCoordBlackSpot = CVector2(0,-0.6);
-  //m_cCoordWhiteSpot = CVector2(0,0.6);
+  m_cCoordWhiteSpot = CVector2(0,0.6);
   m_fObjectiveFunction = 0;
+  critic_losses = 0;
+  actor_losses = 0;
+  entropies = 0.0;
 }
 
 /****************************************/
@@ -43,17 +46,18 @@ void AACLoopFunction::Destroy() {
 /****************************************/
 
 void AACLoopFunction::Reset() {
+  //std::cout << "In the reset part" << std::endl;
   m_fObjectiveFunction = 0;
   fTimeStep = 0;
 
   for (MADDPGLoopFunction::Agent* a : agents){
-    a->policy_param.resize(size_policy_net);
-    std::fill(a->policy_param.begin(), a->policy_param.end(), 0.0f);
-    a->value_param.resize(size_value_net);
-    std::fill(a->value_param.begin(), a->value_param.end(), 0.0f);
     a->optimizer_critic->zero_grad();
     a->optimizer_actor->zero_grad();
   }
+
+  critic_losses = 0.0;
+  actor_losses = 0.0;
+  entropies = 0.0;
 
   MADDPGLoopFunction::Reset();
 }
@@ -84,7 +88,11 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
   } catch(std::exception e) {
   }
   GetNodeAttribute(cParametersNode, "number_robots", nb_robots);
+  GetNodeAttribute(cParametersNode, "buffer_size", max_buffer_size);
   GetNodeAttribute(cParametersNode, "batch_size", batch_size);
+  GetNodeAttribute(cParametersNode, "batch_begin", batch_begin);
+  GetNodeAttribute(cParametersNode, "batch_step", batch_step);
+  GetNodeAttribute(cParametersNode, "update_target", update_target);
   GetNodeAttribute(cParametersNode, "gamma", gamma);
   GetNodeAttribute(cParametersNode, "tau", tau);
 
@@ -132,10 +140,11 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
   GetNodeAttribute(experimentNode, "length", mission_lengh);
 
   fTimeStep = 0;
+  fTimeStepTraining = 0;
 
   SetControllerEpuckAgent();
-  //std::cout << "After Init loop function" << "." << std::endl;
 
+  buffer.resize(max_buffer_size);
 }
 
 void AACLoopFunction::SetControllerEpuckAgent() {
@@ -158,7 +167,8 @@ void AACLoopFunction::SetControllerEpuckAgent() {
     CControllableEntity *pcEntity = any_cast<CControllableEntity *>(it->second);
     //std::cout << "Before per agent" << "." << std::endl;
     CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
-    cController.SetTargetNetwork(agents.at(i)->actor);
+    cController.SetNetworkAndOptimizer(agents.at(i)->actor, agents.at(i)->optimizer_actor);
+    cController.SetTargetNetwork(agents.at(i)->target_actor);
     agents.at(i)->pcEntity = pcEntity;
     i += 1;
   }
@@ -174,10 +184,10 @@ argos::CColor AACLoopFunction::GetFloorColor(const argos::CVector2& c_position_o
     return CColor::BLACK;
   }
 
-  // d = (m_cCoordWhiteSpot - vCurrentPoint).Length();
-  // if (d <= m_fRadius) {
-  //   return CColor::WHITE;
-  // }
+  d = (m_cCoordWhiteSpot - vCurrentPoint).Length();
+  if (d <= m_fRadius) {
+    return CColor::WHITE;
+  }
 
   return CColor::GRAY50;
 }
@@ -186,65 +196,39 @@ argos::CColor AACLoopFunction::GetFloorColor(const argos::CVector2& c_position_o
 /****************************************/
 
 void AACLoopFunction::PreStep() {
-  // Construction of the state : the positions of all the robots in a tensor
-
-  //std::cout << "Before PreStep()" << "." << std::endl;
-  
-
-  torch::Tensor pos = torch::empty({4*nb_robots});
-  CVector2 cEpuckPosition(0,0);
-  CQuaternion cEpuckOrientation;
-  CRadians cRoll, cPitch, cYaw;
-  int pos_index = 0;
-  for (MADDPGLoopFunction::Agent* a : agents){
-    //std::cout << "Before position epuck" << "." << std::endl;
-    cEpuckPosition.Set(a->pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetX(),
-                       a->pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetY());
-    cEpuckOrientation = a->pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Orientation;
-    //std::cout << "After position epuck" << "." << std::endl;
-    cEpuckOrientation.ToEulerAngles(cYaw, cPitch, cRoll);
-
-    pos = pos.index_put_({pos_index}, cEpuckPosition.GetX());
-    pos = pos.index_put_({pos_index+1}, cEpuckPosition.GetY());
-    pos = pos.index_put_({pos_index+2}, std::cos(cYaw.GetValue()));
-    pos = pos.index_put_({pos_index+3}, std::sin(cYaw.GetValue()));
-    pos_index += 4;
-
-    // Get observations that the robots have before the step
-    CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(a->pcEntity->GetController());
-    obs.push_back(cController.Observe());
-    //std::cout << "After observe" << "." << std::endl;
-
-    // Set the right network and optimizer to each agent's controller 
-    try {
-      CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(a->pcEntity->GetController());
-      cController.SetNetworkAndOptimizer(a->actor, a->optimizer_actor);
-    } catch (std::exception &ex) {
-      LOGERR << "Error while setting network: " << ex.what() << std::endl;
-    }
-  }
-
-  // The state with the positions  
-  state = pos.clone();
-  //std::cout << "After prestep" << "." << std::endl;
+    //auto end_time = std::chrono::high_resolution_clock::now();
+    //auto elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
+    //auto now_in_time_t = std::chrono::system_clock::to_time_t(start_time);
+    //std::cout << "Start time before pre step: " << std::ctime(&now_in_time_t) << " milliseconds" << std::endl;
+    //std::cout << "Elapsed time between post and pre: " << elapsed_time << " milliseconds" << std::endl;
+    //start_time = std::chrono::high_resolution_clock::now();
+    //now_in_time_t = std::chrono::system_clock::to_time_t(start_time);
+    //std::cout << "Start time after pre step: " << std::ctime(&now_in_time_t) << " milliseconds" << std::endl;
 }
 
 /****************************************/
 /****************************************/
 
 void AACLoopFunction::PostStep() {
+  
+  // Create an ofstream object for output
+  //torch::autograd::AnomalyMode::set_enabled(true);
+  //std::ofstream outfile;
+  //outfile.open("debug_losses.txt", std::ios_base::app); // append instead of overwrite
   // Assuming that an action is composed of two floats (one for each wheel)
-  //std::cout << "Before poststep" << "." << std::endl;  
+  const int doubleNbRobots = 2*nb_robots;
+  std::vector<MADDPGLoopFunction::Transition*> sample;
+  sample.reserve(batch_size);  
+  torch::Tensor actions = torch::empty({doubleNbRobots});
   torch::Tensor pos = torch::empty({4*nb_robots});
+  std::vector<torch::Tensor> actions_trans;
   CVector2 cEpuckPosition(0,0);
   CQuaternion cEpuckOrientation;
   CRadians cRoll, cPitch, cYaw;
   std::vector<int> rewards(nb_robots, 0);
-  std::vector<torch::Tensor> actions;
   std::vector<torch::Tensor> next_obs;
   int pos_index = 0;
   int i = 0;
-  //std::cout << "Before for agent" << "." << std::endl;  
   for (MADDPGLoopFunction::Agent* a : agents){
     cEpuckPosition.Set(a->pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetX(),
                        a->pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetY());
@@ -266,166 +250,216 @@ void AACLoopFunction::PostStep() {
       rewards[i] = 0;
     }
 
-    // Get action that the robot did through actor network
-    actions.push_back(a->actor.GetAction());
-
     // Get observations that the robots have after the step
+    //std::cout << "Before dynamic cast" << fTimeStepTraining << std::endl;
     CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(a->pcEntity->GetController());
-    next_obs.push_back(cController.Observe());
+    if (fTimeStep == 0){
+      obs.push_back(cController.Observe());
+      next_obs.push_back(cController.Observe());
+    }else{
+      next_obs.push_back(cController.Observe());
+      // Get action that the robot did through actor network
+      actions_trans.push_back(a->actor.GetAction());
+    }
   }
-  //std::cout << "Post for agent" << "." << std::endl;  
 
-  // Next_state after the step
-  state_prime = pos.clone();
-
-  // Need to add this transition to the buffer
-  MADDPGLoopFunction::Transition* transition = new MADDPGLoopFunction::Transition(state, obs, actions, rewards, state_prime, next_obs);
-  buffer.push_back(transition); 
+  if (fTimeStep == 0){
+    state = pos.clone();
+    state_prime = pos.clone();
+  }else {
+    // Next_state after the step
+    state_prime = pos.clone();
+    // Need to add this transition to the buffer
+    MADDPGLoopFunction::Transition* transition = new MADDPGLoopFunction::Transition(state, obs, actions_trans, rewards, state_prime);
+    buffer.push(transition); 
+    if (buffer.is_full()) {
+      MADDPGLoopFunction::Transition* oldest_transition = buffer.pop();
+      delete oldest_transition;
+    }
+  }
 
   // Beginning of the learning loop if we are in training mode and there are enough samples in the buffer
+  //std::cout << "Before learning" << std::endl;
   int buffer_size = static_cast<int>(buffer.size());
-  //std::cout << "buffer size" << buffer_size << std::endl;
-  //std::cout << "batch size" << batch_size << std::endl;
-  if(training && buffer_size >= batch_size){ 
-    //std::cout << "In if training" << "." << std::endl;
-    state = state.to(device);
-    state_prime = state_prime.to(device);
-    
-    // Update on the networks for each agent
-    //std::cout << "Before for agents_size" << "." << std::endl;  
-    for (int a=0; a < nb_robots; a++){
-        //First, need to sample a certain number of transitions from the buffer
-        std::vector<MADDPGLoopFunction::Transition*> sample;
-        std::random_device rd;
-        std::mt19937 gen(rd());
-        std::uniform_int_distribution<> dis(0, buffer_size - 1);
-        //TODO: chnager le 3
-        for (int i = 0; i < batch_size; ++i) {
-            int randomIndex = dis(gen);
-            sample.push_back(buffer.at(randomIndex));
-        }
+  if(training && buffer_size >= batch_begin){ 
+    if(fTimeStepTraining % batch_step == 0){ 
+      for (int a=0; a < nb_robots; a++){
+          //First, need to sample a certain number of transitions from the buffer
+          std::random_device rd;
+          std::mt19937 gen(rd());
+          std::uniform_int_distribution<> dis(0, buffer_size - 1);
+          //std::cout << "Before loop buffer" << std::endl;
+          for (int i = 0; i < batch_size; ++i) {
+              int randomIndex = dis(gen);
+              sample.push_back(buffer.at(randomIndex));
+          }
 
-        // Critic model update
-        torch::Tensor y = torch::empty({sample.size()});
-        torch::Tensor critic_value = torch::empty({sample.size()});
-        //std::cout << "Before for sample size critic" << "." << std::endl;  
-        for (int j=0; j<sample.size(); j++){
-            torch::Tensor target_actions = torch::empty({2*nb_robots});
-            //std::cout << "Target actions" << target_actions.sizes() << std::endl;
-            torch::Tensor actions;
-            int index = 0;
-            //std::cout << "Before for agent_size" << "." << std::endl;  
-            for (int i = 0; i < nb_robots; i++) {
-                //std::cout << "Before dynamic cast" << "." << std::endl; 
-                CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(agents.at(i)->pcEntity->GetController());
-                //std::cout << "Before target_actions" << "." << std::endl; 
-                std::vector<torch::Tensor> target_actions_to_add = cController.TargetAction(sample.at(j)->next_obs.at(i));
-                //std::cout << "Target actions" << target_actions.sizes() << std::endl;
-                //std::cout << "Before input dans target_actions" << "." << std::endl; 
-                target_actions = target_actions.index_put_({index}, target_actions_to_add.at(0));
-                target_actions = target_actions.index_put_({index+1}, target_actions_to_add.at(1));
-                //std::cout << "After input dans target_actions" << "." << std::endl; 
-                //std::cout << "actions" << actions.sizes() << std::endl;
-                //std::cout << "actions du sample vector" << sample.at(j)->actions.size() << std::endl;
-                //std::cout << "actions du sample tensor" << sample.at(j)->actions.at(i).sizes() << std::endl;
-                if (i==0){
-                  actions = sample.at(j)->actions.at(i);
-                }else {
-                  actions = torch::cat({actions, sample.at(j)->actions.at(i)});
-                }
-                index += 2;
+
+          //Critic model update
+          //std::cout << "Before critic update" << std::endl;
+          std::vector<torch::Tensor> states_vec, actions_vec, rewards_vec, next_states_vec, target_actions_vec;
+          for (int j=0; j<sample.size(); j++){
+              states_vec.push_back(sample.at(j)->state);
+              actions_vec.push_back(torch::cat(sample.at(j)->actions, 0)); // Concatenate the action tensors
+              rewards_vec.push_back(torch::tensor(sample.at(j)->rewards.at(a), torch::kFloat32).unsqueeze(0)); // Convert reward to tensor
+              next_states_vec.push_back(sample.at(j)->state_prime);
+
+              // Construct target_actions for each sample
+              std::vector<torch::Tensor> target_actions_to_add;
+              for (int i = 0; i < nb_robots; i++) {
+                  CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(agents.at(i)->pcEntity->GetController());
+                  torch::Tensor action = cController.TargetAction(sample.at(j)->obs.at(i));
+                  target_actions_to_add.push_back(action); // Add a new dimension to the action tensor
+              }
+              target_actions_vec.push_back(torch::cat(target_actions_to_add, 0)); // Concatenate the target action tensors            
+          }
+          // After constructing vectors for critic model update
+          //outfile << "States vector size: " << states_vec.size() << std::endl;
+          //outfile << "States vector: " << states_vec << std::endl;
+          //outfile << "Actions vector size: " << actions_vec.size() << std::endl;
+          //std::cout << "Actions vector: " << actions_vec << std::endl;
+          // Convert vectors to tensors 
+          torch::Tensor states_batch = torch::stack(states_vec, 0);
+          torch::Tensor actions_batch = torch::stack(actions_vec, 0); // This will now have actions from all robots
+          torch::Tensor rewards_batch = torch::stack(rewards_vec, 0);
+          //outfile << "Rewards batch: " << rewards_batch << std::endl;
+          torch::Tensor next_states_batch = torch::stack(next_states_vec, 0);
+          torch::Tensor target_actions_batch = torch::stack(target_actions_vec, 0); // This will now have target actions for all samples
+          
+          // Calculate critic value without detaching
+          torch::Tensor input_critic = torch::cat({states_batch, actions_batch}, 1);
+          torch::Tensor critic_value = agents.at(a)->critic.forward(input_critic);
+          //for (auto& layer : agents.at(a)->critic.hidden_layers) {
+                //outfile << "Weights layer: " << layer->weight << std::endl;
+          //}
+          //outfile << "Weights last layer: " << agents.at(a)->critic.output_layer->weight << std::endl;
+          //outfile << "Critic value: " << critic_value << std::endl;
+          //outfile << "Wrong critic value: " << critic_value[0] << std::endl;
+
+          // Calculate y for each transition in the sample
+          torch::Tensor input_target_critic = torch::cat({next_states_batch, target_actions_batch}, 1);
+          input_target_critic = input_target_critic.toType(torch::kFloat32); // Convert to float
+          //torch::Tensor target_output = agents.at(a)->target_critic.forward(input_target_critic);
+          //outfile << "Target Q-value: " << target_output << std::endl;
+          //outfile << "Weights target critic network:\n" << agents.at(a)->target_critic.parameters() << std::endl;
+          torch::Tensor y = rewards_batch + gamma * agents.at(a)->target_critic.forward(input_target_critic);
+          //outfile << "Y value: " << y << std::endl;
+
+          //outfile << "Q-value: " << critic_value << std::endl;
+
+          // Calculate loss
+          torch::Tensor squared_diff = torch::pow(y - critic_value, 2);
+          torch::Tensor mse = torch::mean(squared_diff);
+          //outfile << "Critic loss: " << mse << std::endl;
+
+          critic_losses += mse.item<float>();
+
+
+          // Calculate gradient of loss
+          //outfile << "Weights before update:\n" << agents.at(a)->critic.parameters() << std::endl;
+
+          agents.at(a)->optimizer_critic->zero_grad();
+          mse.backward();
+          agents.at(a)->optimizer_critic->step();
+
+          //outfile << "Weights after update:\n" << agents.at(a)->critic.parameters() << std::endl;
+          //CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(agents.at(a)->pcEntity->GetController());
+          //entropies += cController.GetPolicyEntropy();
+          //outfile << "Weights target actor network:\n" << cController.GetTargetNetwork()->parameters() << std::endl;
+
+          //std::cout << "Before policy update" << std::endl;
+          // Policy model update
+          torch::Tensor actions_batch_pupdate = torch::zeros({sample.size(), doubleNbRobots}); // Initialize tensor for storing actions from all robots
+          for (int j = 0; j < sample.size(); j++) {
+              int index = 0;
+              for (int i = 0; i < nb_robots; i++) {
+                  if (a == i) {
+                      CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(agents.at(a)->pcEntity->GetController());
+                      torch::Tensor actions_to_add = cController.Action(sample.at(j)->obs.at(a));
+                      actions_batch_pupdate[j][index] = actions_to_add[0];
+                      actions_batch_pupdate[j][index+1] = actions_to_add[1];
+                  }
+                  else {
+                      actions_batch_pupdate[j][index] = sample.at(j)->actions.at(i)[0];
+                      actions_batch_pupdate[j][index+1] = sample.at(j)->actions.at(i)[1];                    
+                  }
+                  index += 2;
+              }
+          }
+          //outfile << "Actions batch for policy update size: " << actions_batch_pupdate.size(0) << std::endl;
+          torch::Tensor input_critic_pupdate = torch::cat({states_batch, actions_batch_pupdate}, 1); // Concatenate the states and actions
+
+          // Use of the critic network of the current agent
+          torch::Tensor value_policy = agents.at(a)->critic.forward(input_critic_pupdate);
+
+          // Policy loss
+          torch::Tensor actor_loss = -torch::mean(value_policy);
+
+          actor_losses += actor_loss.item<float>();
+          //outfile << "Actor loss: " << actor_loss << std::endl;
+
+          agents.at(a)->optimizer_actor->zero_grad();
+          actor_loss.backward();
+          agents.at(a)->optimizer_actor->step();
+      }
+
+      // Update of the target networks
+      //TODO: Change 1000 and put it in the argos file
+      if (fTimeStepTraining % update_target == 0){
+        //std::cout << "Target update" << std::endl;
+        for (int a=0; a<nb_robots; a++){
+            for (size_t i = 0; i < agents.at(a)->critic.parameters().size(); ++i) {
+                // Get the parameters of the critic and target critic networks
+                torch::Tensor critic_param = agents.at(a)->critic.parameters()[i];
+                torch::Tensor target_critic_param = agents.at(a)->target_critic.parameters()[i];
+
+                // Perform the soft update
+                target_critic_param.data().copy_(tau * critic_param.data() + (1.0 - tau) * target_critic_param.data());
             }
-            //std::cout << "Before cat:: actions" << "." << std::endl;
-            torch::Tensor input_target_critic = torch::cat({sample.at(j)->state_prime, target_actions});
-            torch::Tensor input_critic = torch::cat({sample.at(j)->state, actions});
+            for (size_t i = 0; i < agents.at(a)->actor.parameters().size(); ++i) {
+                // Get the parameters of the actor and target actor networks
+                torch::Tensor actor_param = agents.at(a)->actor.parameters()[i];
+                CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(agents.at(a)->pcEntity->GetController());
+                CEpuckNNController::Actor_Net* target_network = cController.GetTargetNetwork();
+                torch::Tensor target_actor_param = target_network->parameters()[i];
 
-            // Calculate critic value without detaching
-            torch::Tensor critic_output = agents.at(a)->critic.forward(input_critic)[0];
-            critic_value = critic_value.index_put_({j}, critic_output);
-
-            // Calculate y for each transition in the sample
-            y = y.index_put_({j}, sample.at(j)->rewards.at(a) + gamma * agents.at(a)->target_critic.forward(input_target_critic)[0]);
-
-            //std::cout << "Size input_target_critic" << input_target_critic.sizes()[0] << std::endl;
-            //std::cout << "Size input_critic" << input_critic.sizes() << std::endl;
-        }
-        //std::cout << "After critic model update" << "." << std::endl;
-
-         // Calculate loss
-        //std::cout << "Before calculate loss" << "." << std::endl;
-        torch::Tensor squared_diff = torch::pow(y - critic_value, 2);
-        torch::Tensor mse = torch::mean(squared_diff);
-        //std::cout << "mse" << mse << std::endl;
-        //std::cout << "After calculate loss" << "." << std::endl;
-
-        // Calculate gradient of loss
-        //std::cout << "Before zero grad" << "." << std::endl;
-        agents.at(a)->optimizer_critic->zero_grad();
-        //std::cout << "Before backward" << "." << std::endl;
-        mse.backward();
-        //std::cout << "Before step" << "." << std::endl;
-        agents.at(a)->optimizer_critic->step();
-
-
-        // Policy model update
-        torch::Tensor value_policy = torch::empty({sample.size()});
-        //std::cout << "Before for buffer_size actor" << "." << std::endl; 
-        for (int j = 0; j < sample.size(); j++) {
-            torch::Tensor actions = torch::empty({2*nb_robots});
-            int index = 0;
-            for (int i = 0; i < nb_robots; i++) {
-              //std::cout << "Size of tensor actions" << actions.sizes() << std::endl;
-                if (a == i) {
-                    CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(agents.at(a)->pcEntity->GetController());
-                    std::vector<torch::Tensor> actions_to_add = cController.Action(sample.at(j)->obs.at(a));
-                    actions = actions.index_put_({index}, actions_to_add.at(0));
-                    actions = actions.index_put_({index+1}, actions_to_add.at(1));
-                }
-                else {
-                    actions = actions.index_put_({index}, sample.at(j)->actions.at(i)[0]);
-                    actions = actions.index_put_({index+1}, sample.at(j)->actions.at(i)[1]);                    
-                }
-                index += 2;
+                // Perform the soft update
+                target_actor_param.data().copy_(tau * actor_param.data() + (1.0 - tau) * target_actor_param.data());
             }
-            //std::cout << "Verif before ::cat" << sample.at(j)->state.sizes() << std::endl;
-            //std::cout << "Verif before ::cat for actions too" << actions.sizes() << std::endl;
-            torch::Tensor input_critic = torch::cat({sample.at(j)->state, actions});
-
-            // Use of the critic network of the current agent
-            value_policy= value_policy.index_put_({j}, agents.at(a)->critic.forward(input_critic)[0]);
         }
-
-        //Policy loss
-        //std::cout << "Before Policy loss" << "." << std::endl; 
-        torch::Tensor actor_loss = -torch::mean(value_policy);
-
-        agents.at(a)->optimizer_actor->zero_grad();
-        actor_loss.backward();
-        agents.at(a)->optimizer_actor->step();
+        
+      }
     }
-
-    // Updqte of the target networks
-    //std::cout << "Here" << std::endl;
-    for (int a=0; a<nb_robots; a++){
-        int target_params_size = static_cast<int>(agents.at(a)->target_critic.parameters().size());
-        for (int p = 0; p < target_params_size; p++) {
-            agents.at(a)->target_critic.parameters().at(p) = torch::mul(agents.at(a)->critic.parameters().at(p), tau) + torch::mul(agents.at(a)->target_critic.parameters().at(p), (1 - tau));
-            CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(agents.at(a)->pcEntity->GetController());
-            CEpuckNNController::Actor_Net* target_network = cController.GetTargetNetwork();
-            target_network->parameters().at(p) = torch::mul(agents.at(a)->actor.parameters().at(p), tau) + torch::mul(target_network->parameters().at(p), (1 - tau));
-        }
-    }     
-  std::cout << "step: " << fTimeStep << std::endl;
+    fTimeStepTraining += 1;
   }
+  fTimeStep += 1;
+  obs = next_obs;
+  state = state_prime;
+  //std::cout << "Fin de post-step" << std::endl;
+  //outfile.close();
+  //auto end_time = std::chrono::high_resolution_clock::now();
+  //auto elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
+  //auto now_in_time_t = std::chrono::system_clock::to_time_t(start_time);
+  //std::cout << "Start time before post step: " << std::ctime(&now_in_time_t) << " milliseconds" << std::endl;
+  //std::cout << "Elapsed time between pre and post: " << elapsed_time << " milliseconds" << std::endl;
+  //start_time = std::chrono::high_resolution_clock::now();
+  //now_in_time_t = std::chrono::system_clock::to_time_t(start_time);
+  //std::cout << "Start time after post step: " << std::ctime(&now_in_time_t) << " milliseconds" << std::endl;
 }
 
 /****************************************/
 /****************************************/
 
 void AACLoopFunction::PostExperiment() {
+  //std::ofstream outfile;
+  //outfile.open("debug_weights.txt", std::ios_base::app); // append instead of overwrite
   LOG << "Time = " << fTimeStep << std::endl;
   LOG << "Score = " << m_fObjectiveFunction << std::endl;
-  std::cout << "NB transitions in buffer " << buffer.size() << std::endl;
+  fEpisode += 1;
+  //outfile << "Next episode: " << fEpisode << std::endl;
+  //std::cout << "NB transitions in buffer " << buffer.size() << std::endl;
+  //outfile << "Critic weights: "  << agents.at(0)->critic.parameters() << std::endl;
+  //outfile << "Actor weights: "  << agents.at(0)->actor.parameters() << std::endl;
 }
 
 /****************************************/
@@ -579,10 +613,6 @@ void AACLoopFunction::SetVectorAgents(std::vector<MADDPGLoopFunction::Agent*> ve
     agents = vectorAgents;
 }
 
-void AACLoopFunction::SetBuffer(std::vector<MADDPGLoopFunction::Transition*> vectorTransitions) {
-    buffer = vectorTransitions;
-}
-
 void AACLoopFunction::SetSizeValueNet(int value) {
     size_value_net = value;
 }
@@ -595,6 +625,23 @@ void AACLoopFunction::RemoveArena() {
     std::ostringstream id;
     id << "arena";
     RemoveEntity(id.str().c_str());
+}
+
+float AACLoopFunction::GetCriticLoss() {
+  std::cout << "Critic losses: " << critic_losses << std::endl;
+  float average = critic_losses / fTimeStepTraining;
+  return average;
+}
+
+float AACLoopFunction::GetActorLoss() {
+  float average = actor_losses / fTimeStepTraining;
+  return average;
+}
+
+float AACLoopFunction::GetEntropy(){
+  std::cout << "Entropies: " << entropies << std::endl;
+  float average = entropies / fTimeStepTraining;
+  return average;
 }
 
 REGISTER_LOOP_FUNCTIONS(AACLoopFunction, "aac_loop_functions");

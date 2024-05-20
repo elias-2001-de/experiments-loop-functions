@@ -1,5 +1,5 @@
 /**
-  * @file <loop-functions/example/ChocolateAACLoopFunc.cpp>
+  * @file <loop-functions/example/ChocolateSCALoopFunc.cpp>
   *
   * @author Antoine Ligot - <aligot@ulb.ac.be>
   *
@@ -8,35 +8,38 @@
   * @license MIT License
   */
 
-#include "AACLoopFunc.h"
+#include "SCALoopFunc.h"
 
 /****************************************/
 /****************************************/
 
-AACLoopFunction::AACLoopFunction() {
-  m_fRadius = 0.6;
-  m_cCoordBlackSpot = CVector2(0,-0.6);
-  //m_cCoordWhiteSpot = CVector2(0,0.6);
+SCALoopFunction::SCALoopFunction() {
+  m_fRadius = 0.3;
+  m_cCoordBlackSpot = CVector2(0.8,-0.1);
+  m_cCoordWhiteSpot = CVector2(-0.8,-0.1);
   m_fObjectiveFunction = 0;
   critic_losses = 0;
   actor_losses = 0;
   entropies = 0.0;
+  m_fWidthShelter = 0.6;
+  m_fHeightShelter = 0.15;
+  m_cPositionShelter = CVector2(0,0);
 }
 
 /****************************************/
 /****************************************/
 
-AACLoopFunction::AACLoopFunction(const AACLoopFunction& orig) {}
+SCALoopFunction::SCALoopFunction(const SCALoopFunction& orig) {}
 
 /****************************************/
 /****************************************/
 
-AACLoopFunction::~AACLoopFunction() {}
+SCALoopFunction::~SCALoopFunction() {}
 
 /****************************************/
 /****************************************/
 
-void AACLoopFunction::Destroy() {
+void SCALoopFunction::Destroy() {
   //std::cout << "Before Destroy" << "." << std::endl;
   agents.clear();
   //RemoveArena();
@@ -45,7 +48,7 @@ void AACLoopFunction::Destroy() {
 /****************************************/
 /****************************************/
 
-void AACLoopFunction::Reset() {
+void SCALoopFunction::Reset() {
   //std::cout << "In the reset part" << std::endl;
   m_fObjectiveFunction = 0;
   fTimeStep = 0;
@@ -65,7 +68,7 @@ void AACLoopFunction::Reset() {
 /****************************************/
 /****************************************/
 
-void AACLoopFunction::Init(TConfigurationNode& t_tree) {
+void SCALoopFunction::Init(TConfigurationNode& t_tree) {
 
   int actor_hidden_dim;
   int actor_num_hidden_layers;
@@ -78,6 +81,36 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
 
 
   MADDPGLoopFunction::Init(t_tree);
+
+  // Initialization of the walls of the shelter
+  CQuaternion angleWall;
+
+  // Center
+  angleWall.FromEulerAngles(CRadians::PI_OVER_TWO, CRadians::ZERO, CRadians::ZERO);
+  m_pcBoxCenter = new CBoxEntity("wall_center",
+      CVector3(0, m_cPositionShelter.GetY() - (m_fHeightShelter/2)- (0.05/2), 0.0),
+      angleWall,
+      false,
+      CVector3(0.05, m_fWidthShelter+0.05, 0.2));
+  AddEntity(*m_pcBoxCenter);
+
+
+  // Left
+  angleWall.FromEulerAngles(CRadians::ZERO, CRadians::ZERO, CRadians::ZERO);
+  m_pcBoxLeft = new CBoxEntity("wall_left",
+      CVector3(-m_fWidthShelter/2-0.05/4, m_cPositionShelter.GetY()-0.05/2, 0.0),
+      angleWall,
+      false,
+      CVector3(0.05, m_fHeightShelter+0.05, 0.2));
+  AddEntity(*m_pcBoxLeft);
+
+  // Right
+  m_pcBoxRight = new CBoxEntity("wall_right",
+      CVector3(m_fWidthShelter/2+0.05/4, m_cPositionShelter.GetY()-0.05/2, 0.0),
+      angleWall,
+      false,
+      CVector3(0.05, m_fHeightShelter+0.05, 0.2));
+  AddEntity(*m_pcBoxRight);
   //std::cout << "Before Init loop function" << "." << std::endl;
 
   //std::cout << "Size agents" << agents.size() << std::endl;
@@ -147,7 +180,7 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
   buffer.resize(max_buffer_size);
 }
 
-void AACLoopFunction::SetControllerEpuckAgent() {
+void SCALoopFunction::SetControllerEpuckAgent() {
   //std::cout << "Before SetControllerEpuckAgent()" << "." << std::endl;
   int i = 0;
 
@@ -177,44 +210,51 @@ void AACLoopFunction::SetControllerEpuckAgent() {
 /****************************************/
 /****************************************/
 
-argos::CColor AACLoopFunction::GetFloorColor(const argos::CVector2& c_position_on_plane) {
+argos::CColor SCALoopFunction::GetFloorColor(const argos::CVector2& c_position_on_plane) {
   CVector2 vCurrentPoint(c_position_on_plane.GetX(), c_position_on_plane.GetY());
   Real d = (m_cCoordBlackSpot - vCurrentPoint).Length();
   if (d <= m_fRadius) {
     return CColor::BLACK;
   }
 
-  // d = (m_cCoordWhiteSpot - vCurrentPoint).Length();
-  // if (d <= m_fRadius) {
-  //   return CColor::WHITE;
-  // }
+  d = (m_cCoordWhiteSpot - vCurrentPoint).Length();
+  if (d <= m_fRadius) {
+    return CColor::BLACK;
+  }
+
+  if (IsInShelter(vCurrentPoint)) {
+    return CColor::WHITE;
+  }
 
   return CColor::GRAY50;
 }
 
-/****************************************/
-/****************************************/
-
-void AACLoopFunction::PreStep() {
-    //auto end_time = std::chrono::high_resolution_clock::now();
-    //auto elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
-    //auto now_in_time_t = std::chrono::system_clock::to_time_t(start_time);
-    //std::cout << "Start time before pre step: " << std::ctime(&now_in_time_t) << " milliseconds" << std::endl;
-    //std::cout << "Elapsed time between post and pre: " << elapsed_time << " milliseconds" << std::endl;
-    //start_time = std::chrono::high_resolution_clock::now();
-    //now_in_time_t = std::chrono::system_clock::to_time_t(start_time);
-    //std::cout << "Start time after pre step: " << std::ctime(&now_in_time_t) << " milliseconds" << std::endl;
+bool SCALoopFunction::IsInShelter(CVector2& c_position) {
+  Real fMaximalXCoord = m_fWidthShelter / 2;
+  Real fMaximalYCoord = (m_fHeightShelter / 2) + m_cPositionShelter.GetY();
+  if (c_position.GetX() > -fMaximalXCoord && c_position.GetX() < fMaximalXCoord) {
+    if (c_position.GetY() > -fMaximalYCoord && c_position.GetY() < fMaximalYCoord) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /****************************************/
 /****************************************/
 
-void AACLoopFunction::PostStep() {
+void SCALoopFunction::PreStep() {
+}
+
+/****************************************/
+/****************************************/
+
+void SCALoopFunction::PostStep() {
   
   // Create an ofstream object for output
   //torch::autograd::AnomalyMode::set_enabled(true);
-  std::ofstream outfile;
-  outfile.open("debug_losses.txt", std::ios_base::app); // append instead of overwrite
+  //std::ofstream outfile;
+  //outfile.open("debug_losses.txt", std::ios_base::app); // append instead of overwrite
   // Assuming that an action is composed of two floats (one for each wheel)
   const int doubleNbRobots = 2*nb_robots;
   std::vector<MADDPGLoopFunction::Transition*> sample;
@@ -241,9 +281,7 @@ void AACLoopFunction::PostStep() {
     pos = pos.index_put_({pos_index+3}, std::sin(cYaw.GetValue()));
     pos_index += 4;
 
-
-    Real fDistanceSpot = (m_cCoordBlackSpot - cEpuckPosition).Length();
-    if (fDistanceSpot <= m_fRadius) {
+    if (IsInShelter(cEpuckPosition)) {
       m_fObjectiveFunction += 1;
       rewards[i] = 1;
     }else{
@@ -270,7 +308,7 @@ void AACLoopFunction::PostStep() {
     // Next_state after the step
     state_prime = pos.clone();
     // Need to add this transition to the buffer
-    MADDPGLoopFunction::Transition* transition = new MADDPGLoopFunction::Transition(state, obs, actions_trans, rewards, state_prime, next_obs);
+    MADDPGLoopFunction::Transition* transition = new MADDPGLoopFunction::Transition(state, obs, actions_trans, rewards, state_prime);
     buffer.push(transition); 
     if (buffer.is_full()) {
       MADDPGLoopFunction::Transition* oldest_transition = buffer.pop();
@@ -333,24 +371,24 @@ void AACLoopFunction::PostStep() {
                 //outfile << "Weights layer: " << layer->weight << std::endl;
           //}
           //outfile << "Weights last layer: " << agents.at(a)->critic.output_layer->weight << std::endl;
-          outfile << "Critic value: " << critic_value << std::endl;
+          //outfile << "Critic value: " << critic_value << std::endl;
           //outfile << "Wrong critic value: " << critic_value[0] << std::endl;
 
           // Calculate y for each transition in the sample
           torch::Tensor input_target_critic = torch::cat({next_states_batch, target_actions_batch}, 1);
           input_target_critic = input_target_critic.toType(torch::kFloat32); // Convert to float
           //torch::Tensor target_output = agents.at(a)->target_critic.forward(input_target_critic);
-          outfile << "Target Q-value: " << target_output << std::endl;
+          //outfile << "Target Q-value: " << target_output << std::endl;
           //outfile << "Weights target critic network:\n" << agents.at(a)->target_critic.parameters() << std::endl;
           torch::Tensor y = rewards_batch + gamma * agents.at(a)->target_critic.forward(input_target_critic);
-          outfile << "Y value: " << y << std::endl;
+          //outfile << "Y value: " << y << std::endl;
 
-          outfile << "Q-value: " << critic_value << std::endl;
+          //outfile << "Q-value: " << critic_value << std::endl;
 
           // Calculate loss
           torch::Tensor squared_diff = torch::pow(y - critic_value, 2);
           torch::Tensor mse = torch::mean(squared_diff);
-          outfile << "Critic loss: " << mse << std::endl;
+          //outfile << "Critic loss: " << mse << std::endl;
 
           critic_losses += mse.item<float>();
 
@@ -396,7 +434,7 @@ void AACLoopFunction::PostStep() {
           torch::Tensor actor_loss = -torch::mean(value_policy);
 
           actor_losses += actor_loss.item<float>();
-          outfile << "Actor loss: " << actor_loss << std::endl;
+          //outfile << "Actor loss: " << actor_loss << std::endl;
 
           agents.at(a)->optimizer_actor->zero_grad();
           actor_loss.backward();
@@ -450,13 +488,13 @@ void AACLoopFunction::PostStep() {
 /****************************************/
 /****************************************/
 
-void AACLoopFunction::PostExperiment() {
+void SCALoopFunction::PostExperiment() {
   //std::ofstream outfile;
   //outfile.open("debug_weights.txt", std::ios_base::app); // append instead of overwrite
   LOG << "Time = " << fTimeStep << std::endl;
   LOG << "Score = " << m_fObjectiveFunction << std::endl;
   fEpisode += 1;
-  outfile << "Next episode: " << fEpisode << std::endl;
+  //outfile << "Next episode: " << fEpisode << std::endl;
   //std::cout << "NB transitions in buffer " << buffer.size() << std::endl;
   //outfile << "Critic weights: "  << agents.at(0)->critic.parameters() << std::endl;
   //outfile << "Actor weights: "  << agents.at(0)->actor.parameters() << std::endl;
@@ -465,14 +503,14 @@ void AACLoopFunction::PostExperiment() {
 /****************************************/
 /****************************************/
 
-Real AACLoopFunction::GetObjectiveFunction() {
+Real SCALoopFunction::GetObjectiveFunction() {
   return m_fObjectiveFunction;
 }
 
 /****************************************/
 /****************************************/
 
-CVector3 AACLoopFunction::GetRandomPosition() {
+CVector3 SCALoopFunction::GetRandomPosition() {
 
   // Generate angle in range [Pi, 2*Pi] for the left half of the disk
   Real a = m_pcRng->Uniform(CRange<Real>(0.0f, 1.0f));
@@ -494,7 +532,7 @@ CVector3 AACLoopFunction::GetRandomPosition() {
 /****************************************/
 
 // Function to compute the log-PDF of the Beta distribution
-double AACLoopFunction::computeBetaLogPDF(double alpha, double beta, double x) {
+double SCALoopFunction::computeBetaLogPDF(double alpha, double beta, double x) {
     // Compute the logarithm of the Beta function
     double logBeta = std::lgamma(alpha) + std::lgamma(beta) - std::lgamma(alpha + beta);
 
@@ -510,7 +548,7 @@ double AACLoopFunction::computeBetaLogPDF(double alpha, double beta, double x) {
 // Assuming actor_net is your Actor Neural Network (an instance of torch::nn::Module)
 // Assuming behavior_probs, beta_parameters, chosen_behavior, chosen_parameter, and td_error are already computed
 
-void AACLoopFunction::update_actor(torch::nn::Module actor_net, torch::Tensor& behavior_probs, 
+void SCALoopFunction::update_actor(torch::nn::Module actor_net, torch::Tensor& behavior_probs, 
                   torch::Tensor& beta_parameters, int chosen_behavior, 
                   double chosen_parameter, double td_error, 
                   torch::optim::Adam* optimizer) {
@@ -542,7 +580,7 @@ void AACLoopFunction::update_actor(torch::nn::Module actor_net, torch::Tensor& b
 /****************************************/
 /****************************************/
 
-void AACLoopFunction::print_grid(at::Tensor grid){
+void SCALoopFunction::print_grid(at::Tensor grid){
     // Get the size of the grid tensor
     auto sizes = grid.sizes();
     int rows = sizes[0];
@@ -605,43 +643,43 @@ void AACLoopFunction::print_grid(at::Tensor grid){
     std::cout << "+" << std::endl;
 }
 
-void AACLoopFunction::SetTraining(bool value) {
+void SCALoopFunction::SetTraining(bool value) {
     training = value;
 }
 
-void AACLoopFunction::SetVectorAgents(std::vector<MADDPGLoopFunction::Agent*> vectorAgents) {
+void SCALoopFunction::SetVectorAgents(std::vector<MADDPGLoopFunction::Agent*> vectorAgents) {
     agents = vectorAgents;
 }
 
-void AACLoopFunction::SetSizeValueNet(int value) {
+void SCALoopFunction::SetSizeValueNet(int value) {
     size_value_net = value;
 }
 
-void AACLoopFunction::SetSizePolicyNet(int policy) {
+void SCALoopFunction::SetSizePolicyNet(int policy) {
     size_policy_net = policy;
 }
 
-void AACLoopFunction::RemoveArena() {
+void SCALoopFunction::RemoveArena() {
     std::ostringstream id;
     id << "arena";
     RemoveEntity(id.str().c_str());
 }
 
-float AACLoopFunction::GetCriticLoss() {
+float SCALoopFunction::GetCriticLoss() {
   std::cout << "Critic losses: " << critic_losses << std::endl;
   float average = critic_losses / fTimeStepTraining;
   return average;
 }
 
-float AACLoopFunction::GetActorLoss() {
+float SCALoopFunction::GetActorLoss() {
   float average = actor_losses / fTimeStepTraining;
   return average;
 }
 
-float AACLoopFunction::GetEntropy(){
+float SCALoopFunction::GetEntropy(){
   std::cout << "Entropies: " << entropies << std::endl;
   float average = entropies / fTimeStepTraining;
   return average;
 }
 
-REGISTER_LOOP_FUNCTIONS(AACLoopFunction, "aac_loop_functions");
+REGISTER_LOOP_FUNCTIONS(SCALoopFunction, "sca_loop_functions");

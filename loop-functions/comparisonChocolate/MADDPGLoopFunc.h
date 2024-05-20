@@ -41,39 +41,90 @@ class MADDPGLoopFunction : public CoreLoopFunctions {
     // Define the Actor and Critic Nets
     struct Critic_Net : torch::nn::Module {
         std::vector<torch::nn::Linear> hidden_layers;
-        torch::nn::Linear output_layer{nullptr};
+        torch::nn::Linear output_layer{nullptr}, state_fc1{nullptr}, state_fc2{nullptr}, fc1{nullptr}, fc2{nullptr}, fc3{nullptr}, action_fc1{nullptr};
+        torch::nn::BatchNorm1d state_bn1{nullptr}, state_bn2{nullptr}, bn3{nullptr}, bn4{nullptr}, bn5{nullptr};
+        int nb_hidden_layers;
 
         Critic_Net(int64_t input_dim = 4, int64_t hidden_dim = 64, int64_t num_hidden_layers = 3, int64_t output_dim = 1) {
             // Create hidden layers
-            if(num_hidden_layers > 0){
-                for (int64_t i = 0; i < num_hidden_layers; ++i) {
-                    int64_t in_features = i == 0 ? input_dim : hidden_dim;
-                    auto layer = torch::nn::Linear(in_features, hidden_dim);
-                    layer->to(torch::kFloat);
-                    torch::nn::init::xavier_uniform_(layer->weight);
-                    hidden_layers.push_back(register_module("fc" + std::to_string(i+1), torch::nn::Linear(in_features, hidden_dim)));
-                }
+            if(hidden_dim <= 64){
+                // Same shape as Ilyes for the network
+                //std::cout << "Comme d'hab " << hidden_dim << std::endl;
+                nb_hidden_layers = num_hidden_layers;
+                if(num_hidden_layers > 0){
+                    for (int64_t i = 0; i < num_hidden_layers; ++i) {
+                        int64_t in_features = i == 0 ? input_dim : hidden_dim;
+                        auto layer = torch::nn::Linear(in_features, hidden_dim);
+                        layer->to(torch::kFloat);
+                        torch::nn::init::xavier_uniform_(layer->weight);
+                        hidden_layers.push_back(register_module("fc" + std::to_string(i+1), torch::nn::Linear(in_features, hidden_dim)));
+                    }
 
-                // Create output layer
-                output_layer = register_module("fc" + std::to_string(num_hidden_layers + 1), torch::nn::Linear(hidden_dim, output_dim));
-                output_layer->to(torch::kFloat);
-                torch::nn::init::xavier_uniform_(output_layer->weight);
+                    // Create output layer
+                    output_layer = register_module("fc" + std::to_string(num_hidden_layers + 1), torch::nn::Linear(hidden_dim, output_dim));
+                    output_layer->to(torch::kFloat);
+                    torch::nn::init::xavier_uniform_(output_layer->weight);
+                }else{
+                    output_layer = register_module("fc", torch::nn::Linear(input_dim, output_dim));
+                    output_layer->to(torch::kFloat);
+                    torch::nn::init::xavier_uniform_(output_layer->weight);
+                }
             }else{
-                output_layer = register_module("fc", torch::nn::Linear(input_dim, output_dim));
-                output_layer->to(torch::kFloat);
-                torch::nn::init::xavier_uniform_(output_layer->weight);
+                //std::cout << "On fait comme dans le GitHub" << std::endl;
+                nb_hidden_layers = 5;
+                state_fc1 = register_module("state_fc1", torch::nn::Linear(4, 16));
+                state_fc1->to(torch::kFloat);
+                torch::nn::init::xavier_uniform_(state_fc1->weight);
+                state_bn1 = register_module("state_bn1", torch::nn::BatchNorm1d(16));
+                state_fc2 = register_module("state_fc2", torch::nn::Linear(16,32));
+                state_fc2->to(torch::kFloat);
+                torch::nn::init::xavier_uniform_(state_fc2->weight);
+                state_bn2 = register_module("state_bn2", torch::nn::BatchNorm1d(32));
+
+                action_fc1 = register_module("action_fc1", torch::nn::Linear(2, 32));
+                action_fc1->to(torch::kFloat);
+                torch::nn::init::xavier_uniform_(action_fc1->weight);
+
+                bn3 = register_module("bn3", torch::nn::BatchNorm1d(32));
+                fc1 = register_module("fc1", torch::nn::Linear(64, 512));
+                fc1->to(torch::kFloat);
+                torch::nn::init::xavier_uniform_(fc1->weight);
+                bn4 = register_module("bn4", torch::nn::BatchNorm1d(512));
+                fc2 = register_module("fc2", torch::nn::Linear(512, 512));
+                fc2->to(torch::kFloat);
+                torch::nn::init::xavier_uniform_(fc2->weight);
+                bn5 = register_module("bn5", torch::nn::BatchNorm1d(512));
+                fc3 = register_module("fc3", torch::nn::Linear(512, 1));
+                fc3->to(torch::kFloat);
+                torch::nn::init::xavier_uniform_(fc3->weight);
             }
         }
 
         torch::Tensor forward(torch::Tensor x) {
             // Apply hidden layers
-            //std::cout << "Nb hidden layers" << hidden_layers << std::endl;
-            for (auto& layer : hidden_layers) {
-                x = torch::tanh(layer->forward(x));
-            }
+            if(nb_hidden_layers <= 3){
+                for (auto& layer : hidden_layers) {
+                    x = torch::tanh(layer->forward(x));
+                }
 
-            // Apply output layer
-            x = output_layer->forward(x);
+                // Apply output layer
+                x = output_layer->forward(x);
+            }else{
+                torch::Tensor x1 = x.index({torch::indexing::Slice(), torch::indexing::Slice(0,4)});
+                torch::Tensor x2 = x.index({torch::indexing::Slice(), torch::indexing::Slice(4, torch::indexing::None)});
+
+                torch::Tensor s = torch::selu(state_bn1->forward(state_fc1->forward(x1)));
+                s = torch::selu(state_bn2->forward(state_fc2->forward(s)));
+
+                torch::Tensor a = torch::selu(bn3->forward(action_fc1->forward(x2)));
+
+                x = torch::cat({s,a}, 1);
+
+                x = torch::dropout(torch::selu(bn4->forward(fc1->forward(x))), 0.5, is_training());
+                x = torch::dropout(torch::selu(bn5->forward(fc2->forward(x))), 0.5, is_training());
+
+                x = fc3->forward(x);
+            }
             return x;
         }
 
@@ -101,10 +152,13 @@ class MADDPGLoopFunction : public CoreLoopFunctions {
             //std::cout << "Before creation of a new agent" << "." << std::endl;
             pcEpuck = nullptr;
             pcEntity = nullptr;
-            std::cout << "Critic input dim" << critic_input_dim << std::endl;
+            //std::cout << "Critic input dim" << critic_input_dim << std::endl;
             critic = Critic_Net(critic_input_dim, critic_hidden_dim, critic_num_hidden_layers, critic_output_dim);
             actor = argos::CEpuckNNController::Actor_Net(actor_input_dim, actor_hidden_dim, actor_num_hidden_layers, actor_output_dim);
             target_actor =  argos::CEpuckNNController::Actor_Net(actor_input_dim, actor_hidden_dim, actor_num_hidden_layers, actor_output_dim);
+            for (auto& param : target_actor.parameters()){
+                param.set_requires_grad(false);
+            }
             optimizer_actor = new torch::optim::Adam(actor.parameters(), torch::optim::AdamOptions(lambda_actor));
             optimizer_actor->zero_grad();
             optimizer_critic = new torch::optim::Adam(critic.parameters(), torch::optim::AdamOptions(lambda_critic));
@@ -114,6 +168,9 @@ class MADDPGLoopFunction : public CoreLoopFunctions {
             value_param.resize(size_value_net);
             std::fill(value_param.begin(), value_param.end(), 0.0f);
             target_critic = Critic_Net(critic_input_dim, critic_hidden_dim, critic_num_hidden_layers, critic_output_dim);
+            for (auto& param : target_critic.parameters()){
+                param.set_requires_grad(false);
+            }
             //std::cout << "After creation of a new agent" << "." << std::endl;
         }
       };
@@ -125,15 +182,13 @@ class MADDPGLoopFunction : public CoreLoopFunctions {
         std::vector<torch::Tensor> actions;
         std::vector<int> rewards;
         torch::Tensor state_prime;
-        std::vector<torch::Tensor> next_obs;
 
-        Transition(torch::Tensor cstr_state, std::vector<torch::Tensor> cstr_obs, std::vector<torch::Tensor> cstr_actions, std::vector<int> cstr_rewards, torch::Tensor cstr_state_prime, std::vector<torch::Tensor> cstr_next_obs) {
+        Transition(torch::Tensor cstr_state, std::vector<torch::Tensor> cstr_obs, std::vector<torch::Tensor> cstr_actions, std::vector<int> cstr_rewards, torch::Tensor cstr_state_prime) {
             state = cstr_state;
             obs = cstr_obs;
             actions = cstr_actions;
             rewards = cstr_rewards;
             state_prime = cstr_state_prime;
-            next_obs = cstr_next_obs;
         }
       };
 

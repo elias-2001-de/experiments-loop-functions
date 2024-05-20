@@ -15,8 +15,8 @@
 
 #include <cmath>
 
-#include "MADDPGLoopFunc.h"
-#include "../../../argos3-nn/src/NNController.h"
+#include "../MADDPGLoopFunc.h"
+#include "../../../../argos3-nn/src/NNController.h"
 
 #include <typeinfo>
 
