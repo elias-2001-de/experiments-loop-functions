@@ -9,6 +9,7 @@
 
 #include <torch/torch.h>
 #include <fstream>
+#include <thread>
 
 #include <argos3/core/simulator/space/space.h>
 #include <argos3/plugins/robots/e-puck/simulator/epuck_entity.h>
@@ -59,6 +60,8 @@ class AACLoopFunction : public MADDPGLoopFunction {
                   torch::Tensor& beta_parameters, int chosen_behavior, 
                   double chosen_parameter, double td_error, 
                   torch::optim::Adam* optimizer);
+      
+      void Update(std::vector<MADDPGLoopFunction::Transition*> sample, int a);
 
       void print_grid(at::Tensor grid);
 

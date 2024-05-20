@@ -283,6 +283,7 @@ void AACLoopFunction::PostStep() {
   int buffer_size = static_cast<int>(buffer.size());
   if(training && buffer_size >= batch_begin){ 
     if(fTimeStepTraining % batch_step == 0){ 
+      std::vector<std::thread> threads;
       for (int a=0; a < nb_robots; a++){
           //First, need to sample a certain number of transitions from the buffer
           std::random_device rd;
@@ -293,118 +294,15 @@ void AACLoopFunction::PostStep() {
               int randomIndex = dis(gen);
               sample.push_back(buffer.at(randomIndex));
           }
+          //Update(sample, a);
+          threads.push_back(std::thread(&AACLoopFunction::Update, this, sample, a));
+      }
 
-
-          //Critic model update
-          //std::cout << "Before critic update" << std::endl;
-          std::vector<torch::Tensor> states_vec, actions_vec, rewards_vec, next_states_vec, target_actions_vec;
-          for (int j=0; j<sample.size(); j++){
-              states_vec.push_back(sample.at(j)->state);
-              actions_vec.push_back(torch::cat(sample.at(j)->actions, 0)); // Concatenate the action tensors
-              rewards_vec.push_back(torch::tensor(sample.at(j)->rewards.at(a), torch::kFloat32).unsqueeze(0)); // Convert reward to tensor
-              next_states_vec.push_back(sample.at(j)->state_prime);
-
-              // Construct target_actions for each sample
-              std::vector<torch::Tensor> target_actions_to_add;
-              for (int i = 0; i < nb_robots; i++) {
-                  CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(agents.at(i)->pcEntity->GetController());
-                  torch::Tensor action = cController.TargetAction(sample.at(j)->obs.at(i));
-                  target_actions_to_add.push_back(action); // Add a new dimension to the action tensor
-              }
-              target_actions_vec.push_back(torch::cat(target_actions_to_add, 0)); // Concatenate the target action tensors            
-          }
-          // After constructing vectors for critic model update
-          //outfile << "States vector size: " << states_vec.size() << std::endl;
-          //outfile << "States vector: " << states_vec << std::endl;
-          //outfile << "Actions vector size: " << actions_vec.size() << std::endl;
-          //std::cout << "Actions vector: " << actions_vec << std::endl;
-          // Convert vectors to tensors 
-          torch::Tensor states_batch = torch::stack(states_vec, 0);
-          torch::Tensor actions_batch = torch::stack(actions_vec, 0); // This will now have actions from all robots
-          torch::Tensor rewards_batch = torch::stack(rewards_vec, 0);
-          //outfile << "Rewards batch: " << rewards_batch << std::endl;
-          torch::Tensor next_states_batch = torch::stack(next_states_vec, 0);
-          torch::Tensor target_actions_batch = torch::stack(target_actions_vec, 0); // This will now have target actions for all samples
-          
-          // Calculate critic value without detaching
-          torch::Tensor input_critic = torch::cat({states_batch, actions_batch}, 1);
-          torch::Tensor critic_value = agents.at(a)->critic.forward(input_critic);
-          //for (auto& layer : agents.at(a)->critic.hidden_layers) {
-                //outfile << "Weights layer: " << layer->weight << std::endl;
-          //}
-          //outfile << "Weights last layer: " << agents.at(a)->critic.output_layer->weight << std::endl;
-          //outfile << "Critic value: " << critic_value << std::endl;
-          //outfile << "Wrong critic value: " << critic_value[0] << std::endl;
-
-          // Calculate y for each transition in the sample
-          torch::Tensor input_target_critic = torch::cat({next_states_batch, target_actions_batch}, 1);
-          input_target_critic = input_target_critic.toType(torch::kFloat32); // Convert to float
-          //torch::Tensor target_output = agents.at(a)->target_critic.forward(input_target_critic);
-          //outfile << "Target Q-value: " << target_output << std::endl;
-          //outfile << "Weights target critic network:\n" << agents.at(a)->target_critic.parameters() << std::endl;
-          torch::Tensor y = rewards_batch + gamma * agents.at(a)->target_critic.forward(input_target_critic);
-          //outfile << "Y value: " << y << std::endl;
-
-          //outfile << "Q-value: " << critic_value << std::endl;
-
-          // Calculate loss
-          torch::Tensor squared_diff = torch::pow(y - critic_value, 2);
-          torch::Tensor mse = torch::mean(squared_diff);
-          //outfile << "Critic loss: " << mse << std::endl;
-
-          critic_losses += mse.item<float>();
-
-
-          // Calculate gradient of loss
-          //outfile << "Weights before update:\n" << agents.at(a)->critic.parameters() << std::endl;
-
-          agents.at(a)->optimizer_critic->zero_grad();
-          mse.backward();
-          agents.at(a)->optimizer_critic->step();
-
-          //outfile << "Weights after update:\n" << agents.at(a)->critic.parameters() << std::endl;
-          //CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(agents.at(a)->pcEntity->GetController());
-          //entropies += cController.GetPolicyEntropy();
-          //outfile << "Weights target actor network:\n" << cController.GetTargetNetwork()->parameters() << std::endl;
-
-          //std::cout << "Before policy update" << std::endl;
-          // Policy model update
-          torch::Tensor actions_batch_pupdate = torch::zeros({sample.size(), doubleNbRobots}); // Initialize tensor for storing actions from all robots
-          for (int j = 0; j < sample.size(); j++) {
-              int index = 0;
-              for (int i = 0; i < nb_robots; i++) {
-                  if (a == i) {
-                      CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(agents.at(a)->pcEntity->GetController());
-                      torch::Tensor actions_to_add = cController.Action(sample.at(j)->obs.at(a));
-                      actions_batch_pupdate[j][index] = actions_to_add[0];
-                      actions_batch_pupdate[j][index+1] = actions_to_add[1];
-                  }
-                  else {
-                      actions_batch_pupdate[j][index] = sample.at(j)->actions.at(i)[0];
-                      actions_batch_pupdate[j][index+1] = sample.at(j)->actions.at(i)[1];                    
-                  }
-                  index += 2;
-              }
-          }
-          //outfile << "Actions batch for policy update size: " << actions_batch_pupdate.size(0) << std::endl;
-          torch::Tensor input_critic_pupdate = torch::cat({states_batch, actions_batch_pupdate}, 1); // Concatenate the states and actions
-
-          // Use of the critic network of the current agent
-          torch::Tensor value_policy = agents.at(a)->critic.forward(input_critic_pupdate);
-
-          // Policy loss
-          torch::Tensor actor_loss = -torch::mean(value_policy);
-
-          actor_losses += actor_loss.item<float>();
-          //outfile << "Actor loss: " << actor_loss << std::endl;
-
-          agents.at(a)->optimizer_actor->zero_grad();
-          actor_loss.backward();
-          agents.at(a)->optimizer_actor->step();
+      for (auto& t : threads){
+        t.join();
       }
 
       // Update of the target networks
-      //TODO: Change 1000 and put it in the argos file
       if (fTimeStepTraining % update_target == 0){
         //std::cout << "Target update" << std::endl;
         for (int a=0; a<nb_robots; a++){
@@ -446,6 +344,115 @@ void AACLoopFunction::PostStep() {
   //now_in_time_t = std::chrono::system_clock::to_time_t(start_time);
   //std::cout << "Start time after post step: " << std::ctime(&now_in_time_t) << " milliseconds" << std::endl;
 }
+
+void AACLoopFunction::Update(std::vector<MADDPGLoopFunction::Transition*> sample, int a){
+  //Critic model update
+  //std::cout << "Before critic update" << std::endl;
+  std::vector<torch::Tensor> states_vec, actions_vec, rewards_vec, next_states_vec, target_actions_vec;
+  for (int j=0; j<sample.size(); j++){
+    states_vec.push_back(sample.at(j)->state);
+    actions_vec.push_back(torch::cat(sample.at(j)->actions, 0)); // Concatenate the action tensors
+    rewards_vec.push_back(torch::tensor(sample.at(j)->rewards.at(a), torch::kFloat32).unsqueeze(0)); // Convert reward to tensor
+    next_states_vec.push_back(sample.at(j)->state_prime);
+
+    // Construct target_actions for each sample
+    std::vector<torch::Tensor> target_actions_to_add;
+    for (int i = 0; i < nb_robots; i++) {
+    CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(agents.at(a)->pcEntity->GetController());
+    torch::Tensor action = cController.TargetAction(sample.at(j)->obs.at(i));
+    target_actions_to_add.push_back(action); // Add a new dimension to the action tensor
+    }
+    target_actions_vec.push_back(torch::cat(target_actions_to_add, 0)); // Concatenate the target action tensors            
+  }
+  // After constructing vectors for critic model update
+  //outfile << "States vector size: " << states_vec.size() << std::endl;
+  //outfile << "States vector: " << states_vec << std::endl;
+  //outfile << "Actions vector size: " << actions_vec.size() << std::endl;
+  //std::cout << "Actions vector: " << actions_vec << std::endl;
+  // Convert vectors to tensors 
+  torch::Tensor states_batch = torch::stack(states_vec, 0);
+  torch::Tensor actions_batch = torch::stack(actions_vec, 0); // This will now have actions from all robots
+  torch::Tensor rewards_batch = torch::stack(rewards_vec, 0);
+  //outfile << "Rewards batch: " << rewards_batch << std::endl;
+  torch::Tensor next_states_batch = torch::stack(next_states_vec, 0);
+  torch::Tensor target_actions_batch = torch::stack(target_actions_vec, 0); // This will now have target actions for all samples
+          
+  // Calculate critic value without detaching
+  torch::Tensor input_critic = torch::cat({states_batch, actions_batch}, 1);
+  torch::Tensor critic_value = agents.at(a)->critic.forward(input_critic);
+  //for (auto& layer : agents.at(a)->critic.hidden_layers) {
+    //outfile << "Weights layer: " << layer->weight << std::endl;
+  //}
+  //outfile << "Weights last layer: " << agents.at(a)->critic.output_layer->weight << std::endl;
+  //outfile << "Critic value: " << critic_value << std::endl;
+  //outfile << "Wrong critic value: " << critic_value[0] << std::endl;
+
+  // Calculate y for each transition in the sample
+  torch::Tensor input_target_critic = torch::cat({next_states_batch, target_actions_batch}, 1);
+  input_target_critic = input_target_critic.toType(torch::kFloat32); // Convert to float
+  //torch::Tensor target_output = agents.at(a)->target_critic.forward(input_target_critic);
+  //outfile << "Target Q-value: " << target_output << std::endl;
+  //outfile << "Weights target critic network:\n" << agents.at(a)->target_critic.parameters() << std::endl;
+  torch::Tensor y = rewards_batch + gamma * agents.at(a)->target_critic.forward(input_target_critic);
+  //outfile << "Y value: " << y << std::endl;
+
+  //outfile << "Q-value: " << critic_value << std::endl;
+
+  // Calculate loss
+  torch::Tensor squared_diff = torch::pow(y - critic_value, 2);
+  torch::Tensor mse = torch::mean(squared_diff);
+  //outfile << "Critic loss: " << mse << std::endl;
+
+  critic_losses += mse.item<float>();
+
+
+  // Calculate gradient of loss
+  //outfile << "Weights before update:\n" << agents.at(a)->critic.parameters() << std::endl;
+
+  agents.at(a)->optimizer_critic->zero_grad();
+  mse.backward();
+  agents.at(a)->optimizer_critic->step();
+
+  //outfile << "Weights after update:\n" << agents.at(a)->critic.parameters() << std::endl;
+  //CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(agents.at(a)->pcEntity->GetController());
+  //entropies += cController.GetPolicyEntropy();
+  //outfile << "Weights target actor network:\n" << cController.GetTargetNetwork()->parameters() << std::endl;
+
+  //std::cout << "Before policy update" << std::endl;
+  // Policy model update
+  torch::Tensor actions_batch_pupdate = torch::zeros({sample.size(), 2*nb_robots}); // Initialize tensor for storing actions from all robots
+  for (int j = 0; j < sample.size(); j++) {
+    int index = 0;
+    for (int i = 0; i < nb_robots; i++) {
+      if (a == i) {
+        CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(agents.at(a)->pcEntity->GetController());
+        torch::Tensor actions_to_add = cController.Action(sample.at(j)->obs.at(a));
+        actions_batch_pupdate[j][index] = actions_to_add[0];
+        actions_batch_pupdate[j][index+1] = actions_to_add[1];
+      }else {
+        actions_batch_pupdate[j][index] = sample.at(j)->actions.at(i)[0];
+        actions_batch_pupdate[j][index+1] = sample.at(j)->actions.at(i)[1];                    
+      }
+      index += 2;
+    }
+  }
+  //outfile << "Actions batch for policy update size: " << actions_batch_pupdate.size(0) << std::endl;
+  torch::Tensor input_critic_pupdate = torch::cat({states_batch, actions_batch_pupdate}, 1); // Concatenate the states and actions
+
+  // Use of the critic network of the current agent
+  torch::Tensor value_policy = agents.at(a)->critic.forward(input_critic_pupdate);
+
+  // Policy loss
+  torch::Tensor actor_loss = -torch::mean(value_policy);
+
+  actor_losses += actor_loss.item<float>();
+  //outfile << "Actor loss: " << actor_loss << std::endl;
+
+  agents.at(a)->optimizer_actor->zero_grad();
+  actor_loss.backward();
+  agents.at(a)->optimizer_actor->step();
+}
+
 
 /****************************************/
 /****************************************/
