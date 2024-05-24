@@ -217,8 +217,6 @@ void AACLoopFunction::PostStep() {
   //outfile.open("debug_losses.txt", std::ios_base::app); // append instead of overwrite
   // Assuming that an action is composed of two floats (one for each wheel)
   const int doubleNbRobots = 2*nb_robots;
-  std::vector<MADDPGLoopFunction::Transition*> sample;
-  sample.reserve(batch_size);  
   torch::Tensor actions = torch::empty({doubleNbRobots});
   torch::Tensor pos = torch::empty({4*nb_robots});
   std::vector<torch::Tensor> actions_trans;
@@ -286,6 +284,7 @@ void AACLoopFunction::PostStep() {
       std::vector<std::thread> threads;
       for (int a=0; a < nb_robots; a++){
           //First, need to sample a certain number of transitions from the buffer
+          std::vector<MADDPGLoopFunction::Transition*> sample;
           std::random_device rd;
           std::mt19937 gen(rd());
           std::uniform_int_distribution<> dis(0, buffer_size - 1);
@@ -346,24 +345,33 @@ void AACLoopFunction::PostStep() {
 }
 
 void AACLoopFunction::Update(std::vector<MADDPGLoopFunction::Transition*> sample, int a){
+  //std::cout << "a value: " << a << std::endl;
+  //std::cout << "sample: " << sample.size() << std::endl;
   //Critic model update
   //std::cout << "Before critic update" << std::endl;
   std::vector<torch::Tensor> states_vec, actions_vec, rewards_vec, next_states_vec, target_actions_vec;
+  // Create a vector of tensors for each robot's observations
+  std::vector<std::vector<torch::Tensor>> all_obs(nb_robots);
   for (int j=0; j<sample.size(); j++){
     states_vec.push_back(sample.at(j)->state);
     actions_vec.push_back(torch::cat(sample.at(j)->actions, 0)); // Concatenate the action tensors
     rewards_vec.push_back(torch::tensor(sample.at(j)->rewards.at(a), torch::kFloat32).unsqueeze(0)); // Convert reward to tensor
     next_states_vec.push_back(sample.at(j)->state_prime);
 
-    // Construct target_actions for each sample
-    std::vector<torch::Tensor> target_actions_to_add;
     for (int i = 0; i < nb_robots; i++) {
-    CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(agents.at(a)->pcEntity->GetController());
-    torch::Tensor action = cController.TargetAction(sample.at(j)->obs.at(i));
-    target_actions_to_add.push_back(action); // Add a new dimension to the action tensor
+      all_obs[i].push_back(sample.at(j)->obs.at(i));
     }
-    target_actions_vec.push_back(torch::cat(target_actions_to_add, 0)); // Concatenate the target action tensors            
   }
+
+    // Construct target_actions for each sample
+  for (int i = 0; i < nb_robots; i++) {
+    CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(agents.at(i)->pcEntity->GetController());
+    torch::Tensor batched_obs = torch::stack(all_obs[i], 0); // Stack the observations
+    torch::Tensor action = cController.TargetAction(batched_obs);
+    target_actions_vec.push_back(action); // Add a new dimension to the action tensor
+  //std::cout << "a value: " << a << std::endl;
+  //std::cout << "target_actions_vec: " << target_actions_vec.size() << std::endl;
+  }         
   // After constructing vectors for critic model update
   //outfile << "States vector size: " << states_vec.size() << std::endl;
   //outfile << "States vector: " << states_vec << std::endl;
@@ -375,7 +383,9 @@ void AACLoopFunction::Update(std::vector<MADDPGLoopFunction::Transition*> sample
   torch::Tensor rewards_batch = torch::stack(rewards_vec, 0);
   //outfile << "Rewards batch: " << rewards_batch << std::endl;
   torch::Tensor next_states_batch = torch::stack(next_states_vec, 0);
-  torch::Tensor target_actions_batch = torch::stack(target_actions_vec, 0); // This will now have target actions for all samples
+  torch::Tensor target_actions_batch = torch::cat(target_actions_vec, 1); // This will now have target actions for all samples
+  //std::cout << "a value: " << a << std::endl;
+  //std::cout << "target_actions_batch: " << target_actions_batch.sizes() << std::endl;
           
   // Calculate critic value without detaching
   torch::Tensor input_critic = torch::cat({states_batch, actions_batch}, 1);

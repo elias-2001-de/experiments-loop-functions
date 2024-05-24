@@ -44,9 +44,11 @@ class MADDPGLoopFunction : public CoreLoopFunctions {
         torch::nn::Linear output_layer{nullptr}, state_fc1{nullptr}, state_fc2{nullptr}, fc1{nullptr}, fc2{nullptr}, fc3{nullptr}, action_fc1{nullptr};
         torch::nn::BatchNorm1d state_bn1{nullptr}, state_bn2{nullptr}, bn3{nullptr}, bn4{nullptr}, bn5{nullptr};
         int nb_hidden_layers;
+        int nb_agents;
 
         Critic_Net(int64_t input_dim = 4, int64_t hidden_dim = 64, int64_t num_hidden_layers = 3, int64_t output_dim = 1) {
             // Create hidden layers
+            nb_agents = num_hidden_layers; //Used only in the case of using the fixed structure of NN
             if(hidden_dim <= 64){
                 // Same shape as Ilyes for the network
                 //std::cout << "Comme d'hab " << hidden_dim << std::endl;
@@ -72,7 +74,7 @@ class MADDPGLoopFunction : public CoreLoopFunctions {
             }else{
                 //std::cout << "On fait comme dans le GitHub" << std::endl;
                 nb_hidden_layers = 5;
-                state_fc1 = register_module("state_fc1", torch::nn::Linear(4, 16));
+                state_fc1 = register_module("state_fc1", torch::nn::Linear(4*num_hidden_layers, 16));
                 state_fc1->to(torch::kFloat);
                 torch::nn::init::xavier_uniform_(state_fc1->weight);
                 state_bn1 = register_module("state_bn1", torch::nn::BatchNorm1d(16));
@@ -81,7 +83,7 @@ class MADDPGLoopFunction : public CoreLoopFunctions {
                 torch::nn::init::xavier_uniform_(state_fc2->weight);
                 state_bn2 = register_module("state_bn2", torch::nn::BatchNorm1d(32));
 
-                action_fc1 = register_module("action_fc1", torch::nn::Linear(2, 32));
+                action_fc1 = register_module("action_fc1", torch::nn::Linear(2*num_hidden_layers, 32));
                 action_fc1->to(torch::kFloat);
                 torch::nn::init::xavier_uniform_(action_fc1->weight);
 
@@ -110,8 +112,8 @@ class MADDPGLoopFunction : public CoreLoopFunctions {
                 // Apply output layer
                 x = output_layer->forward(x);
             }else{
-                torch::Tensor x1 = x.index({torch::indexing::Slice(), torch::indexing::Slice(0,4)});
-                torch::Tensor x2 = x.index({torch::indexing::Slice(), torch::indexing::Slice(4, torch::indexing::None)});
+                torch::Tensor x1 = x.index({torch::indexing::Slice(), torch::indexing::Slice(0,4*nb_agents)});
+                torch::Tensor x2 = x.index({torch::indexing::Slice(), torch::indexing::Slice(4*nb_agents, torch::indexing::None)});
 
                 torch::Tensor s = torch::selu(state_bn1->forward(state_fc1->forward(x1)));
                 s = torch::selu(state_bn2->forward(state_fc2->forward(s)));
