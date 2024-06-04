@@ -228,7 +228,7 @@ void AACLoopFunction::PreStep() {
   at::Tensor grid = torch::zeros({50, 50});
   std::vector<torch::Tensor> positions;
   CSpace::TMapPerType& tEpuckMap = GetSpace().GetEntitiesByType("epuck");
-  CVector2 cEpuckPosition(0,0);
+  CVector2 cEpuckPosition(0,0), other_position(0,0);
   CRadians cRoll, cPitch, cYaw, other_yaw;
   std::vector<torch::Tensor> rewards;
 
@@ -241,7 +241,6 @@ void AACLoopFunction::PreStep() {
 
     // Collect positions and orientations of other e-pucks
     std::vector<std::pair<CVector2, CRadians>> all_positions;
-    CVector2 other_position(0,0);
     CQuaternion cEpuckOrientation;
     for (CSpace::TMapPerType::iterator jt = tEpuckMap.begin(); jt != tEpuckMap.end(); ++jt) {
       if (jt != it) {
@@ -278,7 +277,9 @@ void AACLoopFunction::PreStep() {
       pos[index++] = std::sin(rel.relative_yaw);
     }
 
-    // Reward computation and grid update
+    positions.push_back(pos);
+
+    // Reward computation
     float reward = 0.0;
     Real fDistanceSpot = (m_cCoordBlackSpot - cEpuckPosition).Length();
     if (fDistanceSpot <= m_fRadius) {
@@ -288,11 +289,10 @@ void AACLoopFunction::PreStep() {
     }
     rewards.push_back(torch::tensor(reward));
     m_fObjectiveFunction += reward;
+
     int grid_x = static_cast<int>(std::round((-cEpuckPosition.GetY() + 1.231) / 2.462 * 49));
     int grid_y = static_cast<int>(std::round((cEpuckPosition.GetX() + 1.231) / 2.462 * 49));
     grid[grid_x][grid_y] = 1;
-
-    positions.push_back(pos);
   }
   
   if (fTimeStep == 0)
@@ -626,7 +626,6 @@ float AACLoopFunction::GetCriticLoss() {
   return average;
 }
 
-
 /****************************************/
 /****************************************/
 
@@ -643,7 +642,6 @@ std::vector<RelativePosition> AACLoopFunction::compute_relative_positions(const 
   }
   return relative_positions;
 }
-
 
 /****************************************/
 /****************************************/
