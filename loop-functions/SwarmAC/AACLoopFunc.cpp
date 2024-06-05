@@ -94,6 +94,7 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
     LOGERR << "Error reading ARGOS file: " << e.what() << std::endl;
   }
   GetNodeAttribute(cParametersNode, "number_robots", nb_robots);
+  GetNodeAttribute(cParametersNode, "actor_type", actor_type);
 
   TConfigurationNode criticParameters;
   criticParameters = GetNode(t_tree, "critic");
@@ -113,11 +114,10 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
   TConfigurationNode actorParameters;
   argos::TConfigurationNode& parentNode = *dynamic_cast<argos::TConfigurationNode*>(t_tree.Parent());
   TConfigurationNode controllerNode;
-  TConfigurationNode dandelNode;
   TConfigurationNode actorNode;
   controllerNode = GetNode(parentNode, "controllers");
-  dandelNode = GetNode(controllerNode, "dandel_controller");
-  actorParameters = GetNode(dandelNode, "actor");
+  actorNode = GetNode(controllerNode, actor_type + "_controller");
+  actorParameters = GetNode(actorNode, "actor");
   GetNodeAttribute(actorParameters, "input_dim", actor_input_dim);
   GetNodeAttribute(actorParameters, "hidden_dim", actor_hidden_dim);
   GetNodeAttribute(actorParameters, "num_hidden_layers", actor_num_hidden_layers);
@@ -155,8 +155,8 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
   }
 
   critic_net = Critic_Net(critic_input_dim, critic_hidden_dim, critic_num_hidden_layers, critic_output_dim);
-  actor_net = argos::CEpuckNNController::Actor_Net(actor_input_dim, actor_hidden_dim, actor_num_hidden_layers, actor_output_dim);
-
+  actor_net = argos::CEpuckNNController::Dandel(actor_input_dim, actor_hidden_dim, actor_num_hidden_layers, actor_output_dim);
+  
   critic_net.to(device);
   actor_net.to(device);
 
