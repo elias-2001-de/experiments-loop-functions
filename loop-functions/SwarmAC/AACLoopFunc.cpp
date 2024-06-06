@@ -142,10 +142,18 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
   m_socket_critic = zmq::socket_t(m_context, ZMQ_PUSH);
   m_socket_critic.connect("tcp://localhost:" + std::to_string(port+1));
 
+  // Dandel
+  // if(actor_num_hidden_layers>0){
+  //   size_policy_net = (actor_input_dim*actor_hidden_dim+actor_hidden_dim) + (actor_num_hidden_layers-1)*(actor_hidden_dim*actor_hidden_dim+actor_hidden_dim) + 2 * (actor_hidden_dim*actor_output_dim+actor_output_dim);
+  // }else{
+  //   size_policy_net = actor_input_dim*actor_output_dim + 2 * actor_output_dim;
+  // }
+
+  // Daisy
   if(actor_num_hidden_layers>0){
-    size_policy_net = (actor_input_dim*actor_hidden_dim+actor_hidden_dim) + (actor_num_hidden_layers-1)*(actor_hidden_dim*actor_hidden_dim+actor_hidden_dim) + 2 * (actor_hidden_dim*actor_output_dim+actor_output_dim);
+    size_policy_net = (actor_input_dim*actor_hidden_dim+actor_hidden_dim) + (actor_num_hidden_layers-1)*(actor_hidden_dim*actor_hidden_dim+actor_hidden_dim) + (actor_hidden_dim*actor_output_dim+actor_output_dim) + 6 * (actor_hidden_dim + 1);
   }else{
-    size_policy_net = actor_input_dim*actor_output_dim + 2 * actor_output_dim;
+    size_policy_net = actor_input_dim*actor_output_dim + actor_output_dim + 6 * (actor_input_dim + 1);
   }
 
   if(critic_num_hidden_layers>0){
@@ -155,7 +163,8 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
   }
 
   critic_net = Critic_Net(critic_input_dim, critic_hidden_dim, critic_num_hidden_layers, critic_output_dim);
-  actor_net = argos::CEpuckNNController::Dandel(actor_input_dim, actor_hidden_dim, actor_num_hidden_layers, actor_output_dim);
+  actor_net = argos::CEpuckNNController::Daisy(actor_input_dim, actor_hidden_dim, actor_num_hidden_layers, actor_output_dim);
+  // actor_net = argos::CEpuckNNController::Dandel(actor_input_dim, actor_hidden_dim, actor_num_hidden_layers, actor_output_dim);
   
   critic_net.to(device);
   actor_net.to(device);
