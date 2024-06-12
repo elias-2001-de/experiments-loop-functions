@@ -76,8 +76,11 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
   int critic_num_hidden_layers;
   int critic_output_dim;
   std::string device_to_put;
+<<<<<<< HEAD
   int option_input;
 
+=======
+>>>>>>> 0ab3e560cff2fc141608fd335079269471dd9024
 
   MADDPGLoopFunction::Init(t_tree);
   //std::cout << "Before Init loop function" << "." << std::endl;
@@ -149,7 +152,10 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
   fTimeStepTraining = 0;
 
   SetDevice(device_to_put);
+<<<<<<< HEAD
 
+=======
+>>>>>>> 0ab3e560cff2fc141608fd335079269471dd9024
   SetControllerEpuckAgent();
 
   buffer.resize(max_buffer_size);
@@ -174,6 +180,7 @@ void AACLoopFunction::SetControllerEpuckAgent() {
     std::cout << device << std::endl;
     CEPuckEntity* pcEpuck = any_cast<CEPuckEntity*>(it->second);
     agents.at(i)->pcEpuck = pcEpuck;
+    std::cout << device << std::endl;
     agents.at(i)->critic.to(device);
     agents.at(i)->actor.to(device);
     agents.at(i)->target_critic.to(device);
@@ -388,6 +395,7 @@ void AACLoopFunction::Update(std::vector<MADDPGLoopFunction::Transition*> sample
   std::vector<std::vector<torch::Tensor>> all_obs(nb_robots);
   for (int j=0; j<sample.size(); j++){
     states_vec.push_back(sample.at(j)->state);
+    //std::cout << "State device: " << sample.at(j)->state.device() << std::endl;
     actions_vec.push_back(torch::cat(sample.at(j)->actions, 0)); // Concatenate the action tensors
     rewards_vec.push_back(torch::tensor(sample.at(j)->rewards.at(a), torch::kFloat32).unsqueeze(0)); // Convert reward to tensor
     next_states_vec.push_back(sample.at(j)->state_prime);
@@ -411,7 +419,7 @@ void AACLoopFunction::Update(std::vector<MADDPGLoopFunction::Transition*> sample
   //outfile << "States vector size: " << states_vec.size() << std::endl;
   //outfile << "States vector: " << states_vec << std::endl;
   //outfile << "Actions vector size: " << actions_vec.size() << std::endl;
-  //std::cout << "Actions vector: " << actions_vec << std::endl;
+  //std::cout << "Actions vector: " << std::endl;
   // Convert vectors to tensors 
   torch::Tensor states_batch = torch::stack(states_vec, 0);
   torch::Tensor actions_batch = torch::stack(actions_vec, 0); // This will now have actions from all robots
@@ -419,7 +427,7 @@ void AACLoopFunction::Update(std::vector<MADDPGLoopFunction::Transition*> sample
   //outfile << "Rewards batch: " << rewards_batch << std::endl;
   torch::Tensor next_states_batch = torch::stack(next_states_vec, 0);
   torch::Tensor target_actions_batch = torch::cat(target_actions_vec, 1); // This will now have target actions for all samples
-  //std::cout << "a value: " << a << std::endl;
+  //std::cout << "a value: " << std::endl;
   //std::cout << "target_actions_batch: " << target_actions_batch.sizes() << std::endl;
           
   // Calculate critic value without detaching
@@ -438,12 +446,14 @@ void AACLoopFunction::Update(std::vector<MADDPGLoopFunction::Transition*> sample
   //torch::Tensor target_output = agents.at(a)->target_critic.forward(input_target_critic);
   //outfile << "Target Q-value: " << target_output << std::endl;
   //outfile << "Weights target critic network:\n" << agents.at(a)->target_critic.parameters() << std::endl;
+  //std::cout << "Rewards_batch device: " << rewards_batch.device() << std::endl;
   torch::Tensor y = rewards_batch + gamma * agents.at(a)->target_critic.forward(input_target_critic);
   //outfile << "Y value: " << y << std::endl;
 
   //outfile << "Q-value: " << critic_value << std::endl;
 
   // Calculate loss
+  //std::cout << "Loss" << std::endl;
   torch::Tensor squared_diff = torch::pow(y - critic_value, 2);
   torch::Tensor mse = torch::mean(squared_diff);
   //outfile << "Critic loss: " << mse << std::endl;
@@ -482,12 +492,17 @@ void AACLoopFunction::Update(std::vector<MADDPGLoopFunction::Transition*> sample
     }
     index += 2;
   }
+  torch::Tensor actions_batch_pupdate = torch::cat(actions_batch_vec, 1);
   //outfile << "Actions batch for policy update size: " << actions_batch_pupdate.size(0) << std::endl;
   //std::cout << "After loop" << std::endl;
   torch::Tensor actions_batch_pupdate = torch::cat(actions_batch_vec, 1);
   //outfile << "Actions batch for policy update size: " << actions_batch_pupdate.size(0) << std::endl;
   torch::Tensor input_critic_pupdate = torch::cat({states_batch, actions_batch_pupdate}, 1); // Concatenate the states and actions
   //std::cout << "Size critic batch: " << input_critic_pupdate.sizes() << std::endl;
+<<<<<<< HEAD
+=======
+
+>>>>>>> 0ab3e560cff2fc141608fd335079269471dd9024
   // Use of the critic network of the current agent
   torch::Tensor value_policy = agents.at(a)->critic.forward(input_critic_pupdate);
 
@@ -500,6 +515,8 @@ void AACLoopFunction::Update(std::vector<MADDPGLoopFunction::Transition*> sample
   agents.at(a)->optimizer_actor->zero_grad();
   actor_loss.backward();
   agents.at(a)->optimizer_actor->step();
+
+  //std::cout << "After policy update" << std::endl;
 }
 
 
