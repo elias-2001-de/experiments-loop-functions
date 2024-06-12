@@ -76,11 +76,8 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
   int critic_num_hidden_layers;
   int critic_output_dim;
   std::string device_to_put;
-<<<<<<< HEAD
   int option_input;
 
-=======
->>>>>>> 0ab3e560cff2fc141608fd335079269471dd9024
 
   MADDPGLoopFunction::Init(t_tree);
   //std::cout << "Before Init loop function" << "." << std::endl;
@@ -152,10 +149,7 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
   fTimeStepTraining = 0;
 
   SetDevice(device_to_put);
-<<<<<<< HEAD
 
-=======
->>>>>>> 0ab3e560cff2fc141608fd335079269471dd9024
   SetControllerEpuckAgent();
 
   buffer.resize(max_buffer_size);
@@ -499,10 +493,7 @@ void AACLoopFunction::Update(std::vector<MADDPGLoopFunction::Transition*> sample
   //outfile << "Actions batch for policy update size: " << actions_batch_pupdate.size(0) << std::endl;
   torch::Tensor input_critic_pupdate = torch::cat({states_batch, actions_batch_pupdate}, 1); // Concatenate the states and actions
   //std::cout << "Size critic batch: " << input_critic_pupdate.sizes() << std::endl;
-<<<<<<< HEAD
-=======
 
->>>>>>> 0ab3e560cff2fc141608fd335079269471dd9024
   // Use of the critic network of the current agent
   torch::Tensor value_policy = agents.at(a)->critic.forward(input_critic_pupdate);
 
