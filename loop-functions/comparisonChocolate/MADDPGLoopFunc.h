@@ -155,6 +155,7 @@ class MADDPGLoopFunction : public CoreLoopFunctions {
             pcEpuck = nullptr;
             pcEntity = nullptr;
             //std::cout << "Critic input dim" << critic_input_dim << std::endl;
+            std::cout << "Lambda actor " << lambda_actor << std::endl;
             critic = Critic_Net(critic_input_dim, critic_hidden_dim, critic_num_hidden_layers, critic_output_dim);
             actor = argos::CEpuckNNController::Actor_Net(actor_input_dim, actor_hidden_dim, actor_num_hidden_layers, actor_output_dim);
             target_actor =  argos::CEpuckNNController::Actor_Net(actor_input_dim, actor_hidden_dim, actor_num_hidden_layers, actor_output_dim);
