@@ -204,6 +204,8 @@ class MADDPGLoopFunction : public CoreLoopFunctions {
 
       virtual void SetControllerEpuckAgent() {}
 
+      virtual void SetDevice(std::string device_to_put) {}
+
       virtual float GetActorLoss() {}
 
       virtual float GetCriticLoss() {}

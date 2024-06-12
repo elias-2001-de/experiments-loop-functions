@@ -75,6 +75,8 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
   int critic_hidden_dim;
   int critic_num_hidden_layers;
   int critic_output_dim;
+  std::string device_to_put;
+  int option_input;
 
 
   MADDPGLoopFunction::Init(t_tree);
@@ -95,6 +97,7 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
   GetNodeAttribute(cParametersNode, "update_target", update_target);
   GetNodeAttribute(cParametersNode, "gamma", gamma);
   GetNodeAttribute(cParametersNode, "tau", tau);
+  GetNodeAttribute(cParametersNode, "device", device_to_put);
 
   TConfigurationNode criticParameters;
   criticParameters = GetNode(t_tree, "critic");
@@ -104,6 +107,7 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
   GetNodeAttribute(criticParameters, "num_hidden_layers", critic_num_hidden_layers);
   GetNodeAttribute(criticParameters, "output_dim", critic_output_dim);
   GetNodeAttribute(criticParameters, "lambda_critic", lambda_critic);
+  GetNodeAttribute(criticParameters, "option_input", option_input);
 
   TConfigurationNode actorParameters;
   actorParameters = GetNode(t_tree, "actor");
@@ -129,6 +133,8 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
 
   for (int r = 0; r < nb_robots; r++) {
     MADDPGLoopFunction::Agent* agent = new MADDPGLoopFunction::Agent(critic_input_dim, critic_hidden_dim, critic_num_hidden_layers, critic_output_dim, actor_input_dim, actor_hidden_dim, actor_num_hidden_layers, actor_output_dim, lambda_actor, lambda_critic, size_value_net, size_policy_net);
+    agent->actor.SetInputActor(option_input);
+    agent->target_actor.SetInputActor(option_input);
     agents.push_back(agent);
   }
 
@@ -142,9 +148,21 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
   fTimeStep = 0;
   fTimeStepTraining = 0;
 
+  SetDevice(device_to_put);
+
   SetControllerEpuckAgent();
 
   buffer.resize(max_buffer_size);
+}
+
+void AACLoopFunction::SetDevice(std::string device_to_put){
+  std::cout << "CPU to do the calculations" << std::endl;
+  if(device_to_put == "GPU"){
+    if (torch::cuda::is_available()) {
+      std::cout << "CUDA is available! Training on GPU." << std::endl;
+      device = torch::kCUDA;
+    }
+  }
 }
 
 void AACLoopFunction::SetControllerEpuckAgent() {
@@ -153,10 +171,13 @@ void AACLoopFunction::SetControllerEpuckAgent() {
 
   CSpace::TMapPerType& tEpuckMap = GetSpace().GetEntitiesByType("epuck");
   for (CSpace::TMapPerType::iterator it = tEpuckMap.begin(); it != tEpuckMap.end(); ++it) {
+    std::cout << device << std::endl;
     CEPuckEntity* pcEpuck = any_cast<CEPuckEntity*>(it->second);
     agents.at(i)->pcEpuck = pcEpuck;
     agents.at(i)->critic.to(device);
     agents.at(i)->actor.to(device);
+    agents.at(i)->target_critic.to(device);
+    agents.at(i)->target_actor.to(device);
     i += 1;
   }
 
@@ -169,6 +190,7 @@ void AACLoopFunction::SetControllerEpuckAgent() {
     CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
     cController.SetNetworkAndOptimizer(agents.at(i)->actor, agents.at(i)->optimizer_actor);
     cController.SetTargetNetwork(agents.at(i)->target_actor);
+    cController.SetDevice(device);
     agents.at(i)->pcEntity = pcEntity;
     i += 1;
   }
@@ -196,14 +218,26 @@ argos::CColor AACLoopFunction::GetFloorColor(const argos::CVector2& c_position_o
 /****************************************/
 
 void AACLoopFunction::PreStep() {
-    //auto end_time = std::chrono::high_resolution_clock::now();
-    //auto elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
-    //auto now_in_time_t = std::chrono::system_clock::to_time_t(start_time);
-    //std::cout << "Start time before pre step: " << std::ctime(&now_in_time_t) << " milliseconds" << std::endl;
-    //std::cout << "Elapsed time between post and pre: " << elapsed_time << " milliseconds" << std::endl;
-    //start_time = std::chrono::high_resolution_clock::now();
-    //now_in_time_t = std::chrono::system_clock::to_time_t(start_time);
-    //std::cout << "Start time after pre step: " << std::ctime(&now_in_time_t) << " milliseconds" << std::endl;
+  //std::cout << "Pre-Step" << std::endl;
+  CVector2 cEpuckPosition(0,0);
+  CQuaternion cEpuckOrientation;
+  CRadians cRoll, cPitch, cYaw;
+  for (MADDPGLoopFunction::Agent* a : agents){
+    torch::Tensor pos = torch::empty({4});
+    cEpuckPosition.Set(a->pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetX(),
+                       a->pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetY());
+    cEpuckOrientation = a->pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Orientation;
+    cEpuckOrientation.ToEulerAngles(cYaw, cPitch, cRoll);
+
+    pos = pos.index_put_({0}, cEpuckPosition.GetX());
+    pos = pos.index_put_({1}, cEpuckPosition.GetY());
+    pos = pos.index_put_({2}, std::cos(cYaw.GetValue()));
+    pos = pos.index_put_({3}, std::sin(cYaw.GetValue()));
+    
+    CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(a->pcEntity->GetController());
+
+    cController.SetPosRobot(pos);
+  }
 }
 
 /****************************************/
@@ -262,11 +296,11 @@ void AACLoopFunction::PostStep() {
   }
 
   if (fTimeStep == 0){
-    state = pos.clone();
-    state_prime = pos.clone();
+    state = pos.clone().to(device);
+    state_prime = pos.clone().to(device);
   }else {
     // Next_state after the step
-    state_prime = pos.clone();
+    state_prime = pos.clone().to(device);
     // Need to add this transition to the buffer
     MADDPGLoopFunction::Transition* transition = new MADDPGLoopFunction::Transition(state, obs, actions_trans, rewards, state_prime);
     buffer.push(transition); 
@@ -368,9 +402,10 @@ void AACLoopFunction::Update(std::vector<MADDPGLoopFunction::Transition*> sample
     CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(agents.at(i)->pcEntity->GetController());
     torch::Tensor batched_obs = torch::stack(all_obs[i], 0); // Stack the observations
     torch::Tensor action = cController.TargetAction(batched_obs);
+    //std::cout << "Sizes target_actions: " << action.sizes() << std::endl;
     target_actions_vec.push_back(action); // Add a new dimension to the action tensor
   //std::cout << "a value: " << a << std::endl;
-  //std::cout << "target_actions_vec: " << target_actions_vec.size() << std::endl;
+    //std::cout << "target_actions_vec: " << target_actions_vec.size() << std::endl;
   }         
   // After constructing vectors for critic model update
   //outfile << "States vector size: " << states_vec.size() << std::endl;
@@ -380,7 +415,7 @@ void AACLoopFunction::Update(std::vector<MADDPGLoopFunction::Transition*> sample
   // Convert vectors to tensors 
   torch::Tensor states_batch = torch::stack(states_vec, 0);
   torch::Tensor actions_batch = torch::stack(actions_vec, 0); // This will now have actions from all robots
-  torch::Tensor rewards_batch = torch::stack(rewards_vec, 0);
+  torch::Tensor rewards_batch = torch::stack(rewards_vec, 0).to(device);
   //outfile << "Rewards batch: " << rewards_batch << std::endl;
   torch::Tensor next_states_batch = torch::stack(next_states_vec, 0);
   torch::Tensor target_actions_batch = torch::cat(target_actions_vec, 1); // This will now have target actions for all samples
@@ -430,25 +465,29 @@ void AACLoopFunction::Update(std::vector<MADDPGLoopFunction::Transition*> sample
 
   //std::cout << "Before policy update" << std::endl;
   // Policy model update
-  torch::Tensor actions_batch_pupdate = torch::zeros({sample.size(), 2*nb_robots}); // Initialize tensor for storing actions from all robots
-  for (int j = 0; j < sample.size(); j++) {
-    int index = 0;
-    for (int i = 0; i < nb_robots; i++) {
-      if (a == i) {
-        CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(agents.at(a)->pcEntity->GetController());
-        torch::Tensor actions_to_add = cController.Action(sample.at(j)->obs.at(a));
-        actions_batch_pupdate[j][index] = actions_to_add[0];
-        actions_batch_pupdate[j][index+1] = actions_to_add[1];
-      }else {
-        actions_batch_pupdate[j][index] = sample.at(j)->actions.at(i)[0];
-        actions_batch_pupdate[j][index+1] = sample.at(j)->actions.at(i)[1];                    
-      }
-      index += 2;
+  std::vector<torch::Tensor> actions_batch_vec;
+  int index = 0;
+  for (int i = 0; i < nb_robots; i++) {
+    if (a == i) {
+      CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(agents.at(a)->pcEntity->GetController());
+      torch::Tensor batched_obs = torch::stack(all_obs[a], 0);
+      //std::cout << "Size obs: " << sample.at(j)->obs.at(a).sizes() << std::endl;
+      torch::Tensor actions_to_add = cController.Action(batched_obs);
+      actions_batch_vec.push_back(actions_to_add);
+    }else {
+      torch::Tensor sliced1 = actions_batch.select(1,index);
+      torch::Tensor sliced2 = actions_batch.select(1,index+1);
+      torch::Tensor result = torch::cat({sliced1.unsqueeze(1), sliced2.unsqueeze(1)}, 1);
+      actions_batch_vec.push_back(result);   
     }
+    index += 2;
   }
   //outfile << "Actions batch for policy update size: " << actions_batch_pupdate.size(0) << std::endl;
+  //std::cout << "After loop" << std::endl;
+  torch::Tensor actions_batch_pupdate = torch::cat(actions_batch_vec, 1);
+  //outfile << "Actions batch for policy update size: " << actions_batch_pupdate.size(0) << std::endl;
   torch::Tensor input_critic_pupdate = torch::cat({states_batch, actions_batch_pupdate}, 1); // Concatenate the states and actions
-
+  //std::cout << "Size critic batch: " << input_critic_pupdate.sizes() << std::endl;
   // Use of the critic network of the current agent
   torch::Tensor value_policy = agents.at(a)->critic.forward(input_critic_pupdate);
 
