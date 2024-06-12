@@ -42,17 +42,19 @@ class AACLoopFunction : public MADDPGLoopFunction {
 
       void RemoveArena();
 
-      Real GetObjectiveFunction();
+      virtual Real GetObjectiveFunction();
 
-      float GetCriticLoss();
+      virtual float GetCriticLoss();
 
-      float GetActorLoss();
+      virtual float GetActorLoss();
 
-      float GetEntropy();
+      virtual float GetEntropy();
 
       virtual CColor GetFloorColor(const CVector2& c_position_on_plane);
 
       virtual CVector3 GetRandomPosition();
+
+      virtual void SetDevice(std::string device_to_put);
 
       double computeBetaLogPDF(double alpha, double beta, double x);
 
