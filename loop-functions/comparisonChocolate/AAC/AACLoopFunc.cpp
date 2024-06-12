@@ -488,7 +488,6 @@ void AACLoopFunction::Update(std::vector<MADDPGLoopFunction::Transition*> sample
   }
   //outfile << "Actions batch for policy update size: " << actions_batch_pupdate.size(0) << std::endl;
   //std::cout << "After loop" << std::endl;
-  torch::Tensor actions_batch_pupdate = torch::cat(actions_batch_vec, 1);
   //outfile << "Actions batch for policy update size: " << actions_batch_pupdate.size(0) << std::endl;
   torch::Tensor input_critic_pupdate = torch::cat({states_batch, actions_batch_pupdate}, 1); // Concatenate the states and actions
   //std::cout << "Size critic batch: " << input_critic_pupdate.sizes() << std::endl;
