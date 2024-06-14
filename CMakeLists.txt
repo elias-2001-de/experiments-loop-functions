@@ -2,6 +2,15 @@
 # Set minimum required version
 #
 cmake_minimum_required(VERSION 2.8)
+project(LoopFunction LANGUAGES CXX CUDA)
+
+# Set the C++ standard globally
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+# Set the path to the LibTorch directory
+set(CMAKE_PREFIX_PATH "/home/ilyes/libtorch")
 
 #
 # Make sure we are under Unix

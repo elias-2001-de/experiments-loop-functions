@@ -1,6 +1,3 @@
-# Get the paths of libtorch
-message(${Torch_DIR} )
-
 find_package(Torch REQUIRED)
 # find cppzmq
 find_package(cppzmq)
@@ -18,6 +15,11 @@ add_library(swarmac_loopfunc SHARED
                         #   AACTestLoopFunc.cpp
                           ${LOOP_HEADERS}
                           ${LOOP_SOURCES})
+
+# Set C++17 standard for the additional target
+set_property(TARGET swarmac_loopfunc PROPERTY CXX_STANDARD 17)
+set_property(TARGET swarmac_loopfunc PROPERTY CXX_STANDARD_REQUIRED ON)
+set_property(TARGET swarmac_loopfunc PROPERTY CXX_EXTENSIONS OFF)
 
 target_link_libraries(swarmac_loopfunc 
 			${TORCH_LIBRARIES} 
