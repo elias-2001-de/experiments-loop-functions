@@ -86,13 +86,11 @@ void AACLoopFunction::Reset() {
 /****************************************/
 
 void AACLoopFunction::Init(TConfigurationNode& t_tree) {
+  std::cout << "INIT\n";
   CoreLoopFunctions::Init(t_tree);
   TConfigurationNode cParametersNode;
-  try {
-     cParametersNode = GetNode(t_tree, "params");
-  } catch(std::exception e) {
-    LOGERR << "Error reading ARGOS file: " << e.what() << std::endl;
-  }
+  cParametersNode = GetNode(t_tree, "params");
+
   GetNodeAttribute(cParametersNode, "number_robots", nb_robots);
   GetNodeAttribute(cParametersNode, "actor_type", actor_type);
 
@@ -143,18 +141,18 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
   m_socket_critic.connect("tcp://localhost:" + std::to_string(port+1));
 
   // Dandel
-  // if(actor_num_hidden_layers>0){
-  //   size_policy_net = (actor_input_dim*actor_hidden_dim+actor_hidden_dim) + (actor_num_hidden_layers-1)*(actor_hidden_dim*actor_hidden_dim+actor_hidden_dim) + 2 * (actor_hidden_dim*actor_output_dim+actor_output_dim);
-  // }else{
-  //   size_policy_net = actor_input_dim*actor_output_dim + 2 * actor_output_dim;
-  // }
+  if(actor_num_hidden_layers>0){
+    size_policy_net = (actor_input_dim*actor_hidden_dim+actor_hidden_dim) + (actor_num_hidden_layers-1)*(actor_hidden_dim*actor_hidden_dim+actor_hidden_dim) + 2 * (actor_hidden_dim*actor_output_dim+actor_output_dim);
+  }else{
+    size_policy_net = actor_input_dim*actor_output_dim + 2 * actor_output_dim;
+  }
 
   // Daisy
-  if(actor_num_hidden_layers>0){
-    size_policy_net = (actor_input_dim*actor_hidden_dim+actor_hidden_dim) + (actor_num_hidden_layers-1)*(actor_hidden_dim*actor_hidden_dim+actor_hidden_dim) + (actor_hidden_dim*actor_output_dim+actor_output_dim) + 6 * (actor_hidden_dim + 1);
-  }else{
-    size_policy_net = actor_input_dim*actor_output_dim + actor_output_dim + 6 * (actor_input_dim + 1);
-  }
+  // if(actor_num_hidden_layers>0){
+  //   size_policy_net = (actor_input_dim*actor_hidden_dim+actor_hidden_dim) + (actor_num_hidden_layers-1)*(actor_hidden_dim*actor_hidden_dim+actor_hidden_dim) + (actor_hidden_dim*actor_output_dim+actor_output_dim) + 6 * (actor_hidden_dim + 1);
+  // }else{
+  //   size_policy_net = actor_input_dim*actor_output_dim + actor_output_dim + 6 * (actor_input_dim + 1);
+  // }
 
   if(critic_num_hidden_layers>0){
     size_value_net = (critic_input_dim*critic_hidden_dim+critic_hidden_dim) + (critic_num_hidden_layers-1)*(critic_hidden_dim*critic_hidden_dim+critic_hidden_dim) + (critic_hidden_dim*critic_output_dim+critic_output_dim);
@@ -163,8 +161,8 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
   }
 
   critic_net = Critic_Net(critic_input_dim, critic_hidden_dim, critic_num_hidden_layers, critic_output_dim);
-  actor_net = argos::CEpuckNNController::Daisy(actor_input_dim, actor_hidden_dim, actor_num_hidden_layers, actor_output_dim);
-  // actor_net = argos::CEpuckNNController::Dandel(actor_input_dim, actor_hidden_dim, actor_num_hidden_layers, actor_output_dim);
+  // actor_net = argos::CEpuckNNController::Daisy(actor_input_dim, actor_hidden_dim, actor_num_hidden_layers, actor_output_dim);
+  actor_net = argos::CEpuckNNController::Dandel(actor_input_dim, actor_hidden_dim, actor_num_hidden_layers, actor_output_dim);
   
   critic_net.to(device);
   actor_net.to(device);
@@ -232,7 +230,7 @@ argos::CColor AACLoopFunction::GetFloorColor(const argos::CVector2& c_position_o
 /****************************************/
 
 void AACLoopFunction::PreStep() {
-  // std::cout << "Pre Step\n";
+  std::cout << "Pre Step\n";
   int N = (critic_input_dim - 4)/5; // Number of closest neighbors to consider (4 absolute states + 5 relative states)
   at::Tensor grid = torch::zeros({50, 50});
   std::vector<torch::Tensor> positions;

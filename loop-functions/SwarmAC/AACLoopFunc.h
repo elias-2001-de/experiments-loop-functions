@@ -169,7 +169,7 @@ class AACLoopFunction : public CoreLoopFunctions {
         }
       };
       Critic_Net critic_net;
-      argos::CEpuckNNController::Daisy actor_net;
+      argos::CEpuckNNController::Dandel actor_net;
     //   argos::CEpuckNNController::Dandel actor_net;
 
       // Learning variables
