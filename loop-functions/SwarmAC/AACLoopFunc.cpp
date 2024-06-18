@@ -86,7 +86,6 @@ void AACLoopFunction::Reset() {
 /****************************************/
 
 void AACLoopFunction::Init(TConfigurationNode& t_tree) {
-  std::cout << "INIT\n";
   CoreLoopFunctions::Init(t_tree);
   TConfigurationNode cParametersNode;
   cParametersNode = GetNode(t_tree, "params");
@@ -230,7 +229,6 @@ argos::CColor AACLoopFunction::GetFloorColor(const argos::CVector2& c_position_o
 /****************************************/
 
 void AACLoopFunction::PreStep() {
-  std::cout << "Pre Step\n";
   int N = (critic_input_dim - 4)/5; // Number of closest neighbors to consider (4 absolute states + 5 relative states)
   at::Tensor grid = torch::zeros({50, 50});
   std::vector<torch::Tensor> positions;
