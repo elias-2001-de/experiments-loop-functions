@@ -108,8 +108,8 @@ class AACLoopFunction : public CoreLoopFunctions {
       int nb_robots;
 
       std::string actor_type; 
-      std::string device_type = "cuda"; 
-      torch::Device device = torch::kCUDA;
+      std::string device_type = "cpu"; 
+      torch::Device device = torch::kCPU;
     
       CRange<Real> m_cNeuralNetworkOutputRange;
       
@@ -169,8 +169,8 @@ class AACLoopFunction : public CoreLoopFunctions {
         }
       };
       Critic_Net critic_net;
-    //   argos::CEpuckNNController::Daisy actor_net;
-      argos::CEpuckNNController::Dandel actor_net;
+      argos::CEpuckNNController::Daisy actor_net;
+    //   argos::CEpuckNNController::Dandel actor_net;
 
       // Learning variables
       std::unordered_map<std::string, torch::Tensor> eligibility_trace_critic;
