@@ -126,7 +126,7 @@ class AACLoopFunction : public MADDPGLoopFunction {
 
       std::vector<torch::Tensor> obs;
 
-      torch::Tensor pos_target;
+      torch::Tensor pos_target = torch::empty({2});
 
       torch::Tensor state;
       torch::Tensor state_prime;

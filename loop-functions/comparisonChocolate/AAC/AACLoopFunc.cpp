@@ -16,7 +16,8 @@
 AACLoopFunction::AACLoopFunction() {
   m_fRadius = 0.3;
   m_cCoordBlackSpot = CVector2(0,-0.6);
-  pos_target = torch::Tensor({m_cCoordBlackSpot.GetX(), m_cCoordBlackSpot.GetY()});
+  pos_target = pos_target.index_put_({0}, m_cCoordBlackSpot.GetX());
+  pos_target = pos_target.index_put_({1}, m_cCoordBlackSpot.GetY());
   m_cCoordWhiteSpot = CVector2(0,0.6);
   m_fObjectiveFunction = 0;
   critic_losses = 0;
@@ -490,6 +491,7 @@ void AACLoopFunction::Update(std::vector<MADDPGLoopFunction::Transition*> sample
   }
   //outfile << "Actions batch for policy update size: " << actions_batch_pupdate.size(0) << std::endl;
   //std::cout << "After loop" << std::endl;
+  torch::Tensor actions_batch_pupdate = torch::cat(actions_batch_vec, 1);
   //outfile << "Actions batch for policy update size: " << actions_batch_pupdate.size(0) << std::endl;
   torch::Tensor input_critic_pupdate = torch::cat({states_batch, actions_batch_pupdate}, 1); // Concatenate the states and actions
   //std::cout << "Size critic batch: " << input_critic_pupdate.sizes() << std::endl;
