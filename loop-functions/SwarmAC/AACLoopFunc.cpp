@@ -42,25 +42,17 @@ void AACLoopFunction::Reset() {
   m_fObjectiveFunction = 0;
   fTimeStep = 0;
 
-  policy_param.resize(size_policy_net);
-  std::fill(policy_param.begin(), policy_param.end(), 0.0f);
-  value_param.resize(size_value_net);
-  std::fill(value_param.begin(), value_param.end(), 0.0f);
-
-  for (const auto& named_param : critic_net.named_parameters()) {
+  for (const auto& named_param : critic_net->named_parameters()) {
       if (named_param.value().requires_grad()) {
           eligibility_trace_critic[named_param.key()] = torch::zeros_like(named_param.value()).to(device);
       }
   }
 
-  for (const auto& named_param : actor_net.named_parameters()) {
+  for (const auto& named_param : actor_net->named_parameters()) {
       if (named_param.value().requires_grad()) {
           eligibility_trace_actor[named_param.key()] = torch::zeros_like(named_param.value()).to(device);
       }
   }
-    
-  critic_net.to(device);
-  actor_net.to(device);
 
   optimizer_critic->zero_grad();
   optimizer_actor->zero_grad();
@@ -86,134 +78,46 @@ void AACLoopFunction::Reset() {
 /****************************************/
 
 void AACLoopFunction::Init(TConfigurationNode& t_tree) {
-  CoreLoopFunctions::Init(t_tree);
-  TConfigurationNode cParametersNode;
-  cParametersNode = GetNode(t_tree, "params");
+  std::cout << "INIT\n";
+  std::cout << "actor param: " << actor_net->parameters() << std::endl;;
+  try{
+      optimizer_actor = std::make_shared<torch::optim::Adam>(actor_net->parameters(), torch::optim::AdamOptions(alpha_critic));
+      std::cout << "here\n";
+      optimizer_actor->zero_grad();
+      optimizer_critic = std::make_shared<torch::optim::Adam>(critic_net->parameters(), torch::optim::AdamOptions(alpha_actor));
+      optimizer_critic->zero_grad();
+      std::cout << "there\n";
 
-  GetNodeAttribute(cParametersNode, "number_robots", nb_robots);
-  GetNodeAttribute(cParametersNode, "actor_type", actor_type);
-
-  TConfigurationNode criticParameters;
-  criticParameters = GetNode(t_tree, "critic");
-  
-  GetNodeAttribute(criticParameters, "input_dim", critic_input_dim);
-  // critic_input_dim *= nb_robots;
-  GetNodeAttribute(criticParameters, "hidden_dim", critic_hidden_dim);
-  GetNodeAttribute(criticParameters, "num_hidden_layers", critic_num_hidden_layers);
-  GetNodeAttribute(criticParameters, "output_dim", critic_output_dim);
-  GetNodeAttribute(criticParameters, "lambda_critic", lambda_critic);
-  GetNodeAttribute(criticParameters, "alpha_critic", alpha_critic);
-  GetNodeAttribute(criticParameters, "gamma", gamma);
-  GetNodeAttribute(criticParameters, "device", device_type);
-  device = (device_type == "cuda") ? torch::kCUDA : torch::kCPU;
-  GetNodeAttribute(criticParameters, "port", port);
-
-  TConfigurationNode actorParameters;
-  argos::TConfigurationNode& parentNode = *dynamic_cast<argos::TConfigurationNode*>(t_tree.Parent());
-  TConfigurationNode controllerNode;
-  TConfigurationNode actorNode;
-  controllerNode = GetNode(parentNode, "controllers");
-  actorNode = GetNode(controllerNode, actor_type + "_controller");
-  actorParameters = GetNode(actorNode, "actor");
-  GetNodeAttribute(actorParameters, "input_dim", actor_input_dim);
-  GetNodeAttribute(actorParameters, "hidden_dim", actor_hidden_dim);
-  GetNodeAttribute(actorParameters, "num_hidden_layers", actor_num_hidden_layers);
-  GetNodeAttribute(actorParameters, "output_dim", actor_output_dim);
-  GetNodeAttribute(actorParameters, "lambda_actor", lambda_actor);
-  GetNodeAttribute(actorParameters, "alpha_actor", alpha_actor);
-  GetNodeAttribute(actorParameters, "entropy", entropy_fact);
-
-  TConfigurationNode frameworkNode;
-  TConfigurationNode experimentNode;
-  frameworkNode = GetNode(parentNode, "framework");
-  experimentNode = GetNode(frameworkNode, "experiment");
-  GetNodeAttribute(experimentNode, "length", mission_lengh);
-  mission_lengh *= 10;
-  
-  fTimeStep = 0;
-
-  m_context = zmq::context_t(1);
-  m_socket_actor = zmq::socket_t(m_context, ZMQ_PUSH);
-  m_socket_actor.connect("tcp://localhost:" + std::to_string(port));
-
-  m_socket_critic = zmq::socket_t(m_context, ZMQ_PUSH);
-  m_socket_critic.connect("tcp://localhost:" + std::to_string(port+1));
-
-  if(actor_type == "dandel"){
-    // Dandel
-    if(actor_num_hidden_layers>0){
-      size_policy_net = (actor_input_dim*actor_hidden_dim+actor_hidden_dim) + (actor_num_hidden_layers-1)*(actor_hidden_dim*actor_hidden_dim+actor_hidden_dim) + 2*(actor_hidden_dim*actor_output_dim+actor_output_dim);
-    }else{
-      size_policy_net = actor_input_dim*actor_output_dim + 2 * actor_output_dim;
-    }
-  }else{
-    // // Daisy
-    // if(actor_num_hidden_layers>0){
-    //   size_policy_net = (actor_input_dim*actor_hidden_dim+actor_hidden_dim) + (actor_num_hidden_layers-1)*(actor_hidden_dim*actor_hidden_dim+actor_hidden_dim) + (actor_hidden_dim*actor_output_dim+actor_output_dim) + 6 * (actor_hidden_dim + 1);
-    // }else{
-    //   size_policy_net = actor_input_dim*actor_output_dim + actor_output_dim + 6 * (actor_input_dim + 1);
-    // }
-
-    // Daisy
-    if(actor_num_hidden_layers>0){
-      size_policy_net = (actor_input_dim*actor_hidden_dim+actor_hidden_dim) + (actor_num_hidden_layers-1)*(actor_hidden_dim*actor_hidden_dim+actor_hidden_dim) + (actor_hidden_dim*actor_output_dim+actor_output_dim);
-    }else{
-      size_policy_net = actor_input_dim*actor_output_dim + actor_output_dim;
-    }
-  }
-
-  if(critic_num_hidden_layers>0){
-    size_value_net = (critic_input_dim*critic_hidden_dim+critic_hidden_dim) + (critic_num_hidden_layers-1)*(critic_hidden_dim*critic_hidden_dim+critic_hidden_dim) + (critic_hidden_dim*critic_output_dim+critic_output_dim);
-  }else{
-    size_value_net = critic_input_dim*critic_output_dim + critic_output_dim;
-  }
-
-  critic_net = Critic_Net(critic_input_dim, critic_hidden_dim, critic_num_hidden_layers, critic_output_dim);
-  actor_net = argos::CEpuckNNController::Daisy(actor_input_dim, actor_hidden_dim, actor_num_hidden_layers, actor_output_dim);
-  // actor_net = argos::CEpuckNNController::Dandel(actor_input_dim, actor_hidden_dim, actor_num_hidden_layers, actor_output_dim);
-  
-  critic_net.to(device);
-  actor_net.to(device);
-
-  optimizer_actor = std::make_shared<torch::optim::Adam>(actor_net.parameters(), torch::optim::AdamOptions(alpha_critic));
-  optimizer_actor->zero_grad();
-  optimizer_critic = std::make_shared<torch::optim::Adam>(critic_net.parameters(), torch::optim::AdamOptions(alpha_actor));
-  optimizer_critic->zero_grad();
-
-  policy_param.resize(size_policy_net);
-  std::fill(policy_param.begin(), policy_param.end(), 0.0f);
-  value_param.resize(size_value_net);
-  std::fill(value_param.begin(), value_param.end(), 0.0f);
-
-  // std::cout << "size_policy_net = " <<  size_policy_net << std::endl;
-  // std::cout << "size_value_net = " <<  size_value_net << std::endl;
-
-
-  for (const auto& named_param : critic_net.named_parameters()) {
-      if (named_param.value().requires_grad()) {
-          eligibility_trace_critic[named_param.key()] = torch::zeros_like(named_param.value()).to(device);
+      for (const auto& named_param : critic_net->named_parameters()) {
+          if (named_param.value().requires_grad()) {
+              eligibility_trace_critic[named_param.key()] = torch::zeros_like(named_param.value()).to(device);
+          }
       }
-  }
+      std::cout << "there\n";
 
-  for (const auto& named_param : actor_net.named_parameters()) {
-      if (named_param.value().requires_grad()) {
-          eligibility_trace_actor[named_param.key()] = torch::zeros_like(named_param.value()).to(device);
+      for (const auto& named_param : actor_net->named_parameters()) {
+          if (named_param.value().requires_grad()) {
+              eligibility_trace_actor[named_param.key()] = torch::zeros_like(named_param.value()).to(device);
+          }
       }
+
+      TDerrors.resize(mission_lengh);
+      std::fill(TDerrors.begin(), TDerrors.end(), 0.0f);
+
+      Entropies.resize(mission_lengh);
+      std::fill(Entropies.begin(), Entropies.end(), 0.0f);
+
+      critic_losses.resize(mission_lengh);
+      std::fill(critic_losses.begin(), critic_losses.end(), 0.0f);
+
+      actor_losses.resize(mission_lengh);
+      std::fill(actor_losses.begin(), actor_losses.end(), 0.0f);
+
+      I = 1;
+  }catch (std::exception &ex) {
+    LOGERR << "Error in controller: " << ex.what() << std::endl;
   }
-
-  TDerrors.resize(mission_lengh);
-  std::fill(TDerrors.begin(), TDerrors.end(), 0.0f);
-
-  Entropies.resize(mission_lengh);
-  std::fill(Entropies.begin(), Entropies.end(), 0.0f);
-
-  critic_losses.resize(mission_lengh);
-  std::fill(critic_losses.begin(), critic_losses.end(), 0.0f);
-
-  actor_losses.resize(mission_lengh);
-  std::fill(actor_losses.begin(), actor_losses.end(), 0.0f);
-
-  I = 1;
+  
 }
 
 /****************************************/
@@ -238,6 +142,7 @@ argos::CColor AACLoopFunction::GetFloorColor(const argos::CVector2& c_position_o
 /****************************************/
 
 void AACLoopFunction::PreStep() {
+  std::cout << "Prestep\n";
   int N = (critic_input_dim - 4)/5; // Number of closest neighbors to consider (4 absolute states + 5 relative states)
   at::Tensor grid = torch::zeros({50, 50});
   std::vector<torch::Tensor> positions;
@@ -317,40 +222,6 @@ void AACLoopFunction::PreStep() {
       states.push_back(state.clone());
     }
     
-    // std::cout << "state = " <<  state << std::endl;
-
-    // Load up-to-date value network
-    std::vector<float> critic;
-    m_value->mutex.lock();
-    for (auto w : m_value->vec) {
-        critic.push_back(w);
-    }
-    m_value->mutex.unlock();
-
-    // Update all parameters with values from the new_params vector
-    size_t index = 0;
-    for (auto& param : critic_net.parameters()) {
-      auto param_data = torch::from_blob(critic.data() + index, param.data().sizes()).clone();
-      param.data() = param_data;
-      index += param_data.numel();
-    }
-
-    // Load up-to-date policy network
-    std::vector<float> actor;
-    m_policy->mutex.lock();
-    for(auto w : m_policy->vec){
-      actor.push_back(w);
-    }
-    m_policy->mutex.unlock();
-
-    // Update all parameters with values from the new_params vector
-    index = 0;
-    for (auto& param : actor_net.parameters()) {
-      auto param_data = torch::from_blob(actor.data() + index, param.data().sizes()).clone();
-      param.data() = param_data;
-      index += param_data.numel();
-    }
-    
     // Launch the experiment with the correct random seed and network,
     // and evaluate the average fitness
     CSpace::TMapPerType cEntities = GetSpace().GetEntitiesByType("controller");
@@ -386,9 +257,8 @@ void AACLoopFunction::PreStep() {
         torch::Tensor next_state_batch = torch::stack(states_prime).to(device);
 
         // Forward passes
-        critic_net.to(device);
-        torch::Tensor v_state = critic_net.forward(state_batch);
-        torch::Tensor v_state_prime = critic_net.forward(next_state_batch);
+        torch::Tensor v_state = critic_net->forward(state_batch);
+        torch::Tensor v_state_prime = critic_net->forward(next_state_batch);
         
 
         // Adjust for the terminal state
@@ -396,33 +266,21 @@ void AACLoopFunction::PreStep() {
             v_state_prime = torch::zeros_like(v_state_prime);
         }
 
-        // Global reward
-        // LOG << "rewards = " <<  rewards << std::endl;
-
         // TD error
         torch::Tensor reward_batch = torch::stack(rewards).unsqueeze(1).to(device);
         torch::Tensor td_errors = reward_batch + gamma * v_state_prime - v_state;
-
-        // std::cout << "state_batch = " <<  state_batch << std::endl;
-        // std::cout << "next_state_batch = " <<  next_state_batch << std::endl;
-        // std::cout << "v_state = " <<  v_state << std::endl;
-        // std::cout << "v_state_prime = " <<  v_state_prime << std::endl;
-        // std::cout << "reward_batch = " <<  reward_batch << std::endl;
-        // std::cout << "td_errors = " <<  td_errors << std::endl;
-
         
         TDerrors[fTimeStep] = td_errors.mean().item<float>();
 
         // Critic Loss
         torch::Tensor critic_loss = td_errors.pow(2).mean();
-        // std::cout << "critic_loss = " <<  critic_loss << std::endl;
         critic_losses[fTimeStep] = critic_loss.item<float>();
 
         // Backward and optimize for critic
         optimizer_critic->zero_grad();
         critic_loss.backward();
         // Update eligibility traces and gradients
-        for (auto& named_param : critic_net.named_parameters()) {
+        for (auto& named_param : critic_net->named_parameters()) {
             auto& param = named_param.value();
             if (param.grad().defined()) {
                 auto& eligibility = eligibility_trace_critic[named_param.key()];
@@ -443,8 +301,6 @@ void AACLoopFunction::PreStep() {
           log_probs.push_back(cController.GetPolicyLogProbs().to(device)); 
           entropies.push_back(cController.GetPolicyEntropy().to(device)); 
         }
-        // std::cout << "log_probs = " <<  log_probs << std::endl;
-        // std::cout << "entropies = " <<  entropies << std::endl;
 
         // Calculate policy loss using the per-robot TD error times the logprob
         torch::Tensor log_probs_batch = torch::stack(log_probs).unsqueeze(1);
@@ -453,25 +309,21 @@ void AACLoopFunction::PreStep() {
         // Add entropy term for better exploration
         torch::Tensor entropy_batch = torch::stack(entropies).unsqueeze(1);
         policy_loss -= entropy_fact * entropy_batch.mean();
-        // std::cout << "log_probs_batch = " <<  log_probs_batch << std::endl;
-        // std::cout << "entropy_batch = " <<  entropy_batch << std::endl;
-        // std::cout << "policy_loss = " <<  policy_loss << std::endl;
+
         actor_losses[fTimeStep] = policy_loss.item<float>();
         Entropies[fTimeStep] = entropy_batch.mean().item<float>();
 
         // Backward and optimize for actor
-        actor_net.to(device);
         optimizer_actor->zero_grad();
         policy_loss.backward();
         // Update eligibility traces and gradients
-        for (auto& named_param : actor_net.named_parameters()) {
+        for (auto& named_param : actor_net->named_parameters()) {
             auto& param = named_param.value();
             if (param.grad().defined()) {
                 auto& eligibility = eligibility_trace_actor[named_param.key()];
                 eligibility.mul_(gamma * lambda_actor).add_(param.grad() * I);
                 param.mutable_grad() = eligibility.clone();
             }
-            // std::cout << "actor " <<  named_param.key() << " grad: " << param.grad() << std::endl;
         }
         optimizer_actor->step();
 
@@ -479,61 +331,12 @@ void AACLoopFunction::PreStep() {
       }catch (std::exception &ex) {
         LOGERR << "Error in training loop: " << ex.what() << std::endl;
       }
-      GetParametersVector(actor_net, policy_param);
-      GetParametersVector(critic_net, value_param);
-
-      // actor
-      // std::cout << "policy_param: " << policy_param << std::endl;
-      Data policy_data {policy_param};   
-      std::string serialized_data = serialize(policy_data);
-      zmq::message_t message(serialized_data.size());
-      memcpy(message.data(), serialized_data.c_str(), serialized_data.size());
-      m_socket_actor.send(message, zmq::send_flags::dontwait);
-      // critic
-      // std::cout << "value_param: " << value_param << std::endl;
-      Data value_data {value_param};   
-      serialized_data = serialize(value_data);
-      message.rebuild(serialized_data.size());
-      memcpy(message.data(), serialized_data.c_str(), serialized_data.size());
-      m_socket_critic.send(message, zmq::send_flags::dontwait);  
     }
     
     states.clear();
     for (const auto& state : positions)
     {
       states.push_back(state.clone());
-    }
-
-    // Load up-to-date value network
-    std::vector<float> critic;
-    m_value->mutex.lock();
-    for (auto w : m_value->vec) {
-        critic.push_back(w);
-    }
-    m_value->mutex.unlock();
-
-    // Update all parameters with values from the new_params vector
-    size_t index = 0;
-    for (auto& param : critic_net.parameters()) {
-      auto param_data = torch::from_blob(critic.data() + index, param.data().sizes()).clone();
-      param.data() = param_data;
-      index += param_data.numel();
-    }
-
-    // Load up-to-date policy network
-    std::vector<float> actor;
-    m_policy->mutex.lock();
-    for(auto w : m_policy->vec){
-      actor.push_back(w);
-    }
-    m_policy->mutex.unlock();
-
-    // Update all parameters with values from the new_params vector
-    index = 0;
-    for (auto& param : actor_net.parameters()) {
-      auto param_data = torch::from_blob(actor.data() + index, param.data().sizes()).clone();
-      param.data() = param_data;
-      index += param_data.numel();
     }
     
     // Launch the experiment with the correct random seed and network,
@@ -546,8 +349,6 @@ void AACLoopFunction::PreStep() {
       try {
         CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
         cController.SetNetworkAndOptimizer(actor_net, optimizer_actor, device_type);
-        // std::cout << "state " << i << " : " <<  states[i] << std::endl;
-        // cController.SetGlobalState(states[i]);
         i++;
       } catch (std::exception &ex) {
         LOGERR << "Error while setting network: " << ex.what() << std::endl;
@@ -689,33 +490,6 @@ double AACLoopFunction::computeBetaLogPDF(double alpha, double beta, double x) {
 
     return logPDF;
 }
-
-/****************************************/
-/****************************************/
-
-void AACLoopFunction::GetParametersVector(const torch::nn::Module& module, std::vector<float>& params_vector) {
-    // Calculate total number of parameters
-    int64_t total_params = 0;
-    for (const auto& p : module.parameters()) {
-        total_params += p.numel();
-    }
-
-    // Clear the vector and reserve space to avoid reallocations
-    params_vector.clear();
-    params_vector.reserve(total_params);
-
-    // Iterate through all parameters and add their elements to the vector
-    for (const auto& p : module.parameters()) {
-        // Ensure the tensor is on the CPU before accessing its data
-        auto p_cpu = p.data().view(-1).to(torch::kCPU);
-        auto p_data_ptr = p_cpu.data_ptr<float>();
-        auto num_elements = p_cpu.numel();
-        for (int64_t i = 0; i < num_elements; ++i) {
-            params_vector.push_back(p_data_ptr[i]);
-        }
-    }
-}
-
 
 /****************************************/
 /****************************************/

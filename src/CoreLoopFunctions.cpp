@@ -78,12 +78,12 @@ void CoreLoopFunctions::RemoveRobots() {
   }
 }
 
-void CoreLoopFunctions::SetPolicyPointer(shared_data* policy) {
-    m_policy = policy;
+void CoreLoopFunctions::SetPolicyPointer(argos::CEpuckNNController::Daisy* policy) {
+    actor_net = policy;
 }
 
-void CoreLoopFunctions::SetValuePointer(shared_data* value) {
-    m_value = value;
+void CoreLoopFunctions::SetValuePointer(Critic_Net* value) {
+    critic_net = value;
 }
 
 void CoreLoopFunctions::SetTraining(bool value) {

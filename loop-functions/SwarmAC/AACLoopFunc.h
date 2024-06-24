@@ -69,8 +69,6 @@ class AACLoopFunction : public CoreLoopFunctions {
 
       double computeBetaLogPDF(double alpha, double beta, double x);
 
-      void GetParametersVector(const torch::nn::Module& module, std::vector<float>& params_vector);
-
       void print_grid(at::Tensor grid, int step);
 
       virtual void SetTraining(bool value);
@@ -87,10 +85,6 @@ class AACLoopFunction : public CoreLoopFunctions {
       // Get the time step
       int fTimeStep;
       int mission_lengh;
-      
-      zmq::context_t m_context;
-      zmq::socket_t m_socket_actor;
-      zmq::socket_t m_socket_critic;
 
       // Network
       int critic_input_dim;
@@ -108,68 +102,12 @@ class AACLoopFunction : public CoreLoopFunctions {
       int nb_robots;
 
       std::string actor_type; 
-      std::string device_type = "cpu"; 
-      torch::Device device = torch::kCPU;
+      std::string device_type = "cuda"; 
+      torch::Device device = torch::kCUDA;
     
       CRange<Real> m_cNeuralNetworkOutputRange;
       
       // Define the Actor and Critic Nets
-      struct Critic_Net : torch::nn::Module {
-        std::vector<torch::nn::Linear> hidden_layers;
-        torch::nn::Linear output_layer{nullptr};
-
-        Critic_Net(int64_t input_dim = 4, int64_t hidden_dim = 64, int64_t num_hidden_layers = 3, int64_t output_dim = 1) {
-            // Create hidden layers
-            if(num_hidden_layers > 0){
-                for (int64_t i = 0; i < num_hidden_layers; ++i) {
-                    int64_t in_features = i == 0 ? input_dim : hidden_dim;
-                    hidden_layers.push_back(register_module("fc" + std::to_string(i+1), torch::nn::Linear(in_features, hidden_dim)));
-                }
-
-                // Create output layer
-                output_layer = register_module("fc_output", torch::nn::Linear(hidden_dim, output_dim));
-            }else{
-                output_layer = register_module("fc", torch::nn::Linear(input_dim, output_dim));
-            }
-        }
-
-        torch::Tensor forward(torch::Tensor x) {
-            // Apply hidden layers
-            for (auto& layer : hidden_layers) {
-                x = torch::tanh(layer->forward(x));
-            }
-
-            // Apply output layer
-            x = output_layer->forward(x);
-            return x;
-        }
-
-        void print_last_layer_params() {
-            int i = 0;
-            for (auto& layer : hidden_layers) {
-                std::cout << "Weights of layer " << i << ":\n" << layer->weight << std::endl;
-                std::cout << "Weights of layer " << i << ":\n" << layer->bias << std::endl;
-                i++;
-            }
-            // Print parameters of the output layer
-            std::cout << "Weights of last layer:\n" << output_layer->weight << std::endl;
-            std::cout << "Bias of last layer:\n" << output_layer->bias << std::endl;
-        }
-
-        void print_params() {
-            int i = 0;
-            for (auto& layer : hidden_layers) {
-                std::cout << "Weights of layer " << i << ":\n" << layer->weight << std::endl;
-                std::cout << "Weights of layer " << i << ":\n" << layer->bias << std::endl;
-                i++;
-            }
-            // Print parameters of the output layer
-            std::cout << "Weights of last layer:\n" << output_layer->weight << std::endl;
-            std::cout << "Bias of last layer:\n" << output_layer->bias << std::endl;
-        }
-      };
-      Critic_Net critic_net;
-      argos::CEpuckNNController::Daisy actor_net;
     //   argos::CEpuckNNController::Dandel actor_net;
 
       // Learning variables
@@ -192,8 +130,6 @@ class AACLoopFunction : public CoreLoopFunctions {
       float alpha_actor;
       float entropy_fact;
 
-      int64_t port; // TCP interprocess comunication port number for crtic (port+1 for the actor)
-
       std::shared_ptr<torch::optim::Optimizer> optimizer_actor;
       std::shared_ptr<torch::optim::Optimizer> optimizer_critic;
 
@@ -201,7 +137,6 @@ class AACLoopFunction : public CoreLoopFunctions {
       std::vector<float> Entropies;
       std::vector<float> critic_losses;
       std::vector<float> actor_losses;
-
 };
 
 #endif
