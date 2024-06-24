@@ -16,6 +16,7 @@
 AACLoopFunction::AACLoopFunction() {
   m_fRadius = 0.3;
   m_cCoordBlackSpot = CVector2(0,-0.6);
+  pos_target = torch::Tensor({m_cCoordBlackSpot.GetX(), m_cCoordBlackSpot.GetY()});
   m_cCoordWhiteSpot = CVector2(0,0.6);
   m_fObjectiveFunction = 0;
   critic_losses = 0;
@@ -192,6 +193,7 @@ void AACLoopFunction::SetControllerEpuckAgent() {
     cController.SetNetworkAndOptimizer(agents.at(i)->actor, agents.at(i)->optimizer_actor);
     cController.SetTargetNetwork(agents.at(i)->target_actor);
     cController.SetDevice(device);
+    cController.SetPosTarget(pos_target);
     agents.at(i)->pcEntity = pcEntity;
     i += 1;
   }
