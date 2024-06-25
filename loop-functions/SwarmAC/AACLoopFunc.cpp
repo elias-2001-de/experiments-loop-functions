@@ -42,9 +42,16 @@ void AACLoopFunction::Reset() {
   m_fObjectiveFunction = 0;
   fTimeStep = 0;
 
+  optimizer_actor = std::make_shared<torch::optim::Adam>(actor_net->parameters(), torch::optim::AdamOptions(alpha_critic));
+  optimizer_critic = std::make_shared<torch::optim::Adam>(critic_net->parameters(), torch::optim::AdamOptions(alpha_actor));
+
   for (const auto& named_param : critic_net->named_parameters()) {
       if (named_param.value().requires_grad()) {
+          // std::cout << "eligibility loop\n";
+          // std::cout << "named_param.key() : " << named_param.key() << std::endl;
+          // std::cout << "eligibility_trace_critic[named_param.key()] : " << eligibility_trace_critic[named_param.key()] << std::endl;
           eligibility_trace_critic[named_param.key()] = torch::zeros_like(named_param.value()).to(device);
+          // std::cout << "after eligibility loop\n";
       }
   }
 
@@ -72,51 +79,93 @@ void AACLoopFunction::Reset() {
   std::fill(actor_losses.begin(), actor_losses.end(), 0.0f);
 
   CoreLoopFunctions::Reset();
+
 }
 
 /****************************************/
 /****************************************/
 
 void AACLoopFunction::Init(TConfigurationNode& t_tree) {
-  std::cout << "INIT\n";
-  std::cout << "actor param: " << actor_net->parameters() << std::endl;;
-  try{
-      optimizer_actor = std::make_shared<torch::optim::Adam>(actor_net->parameters(), torch::optim::AdamOptions(alpha_critic));
-      std::cout << "here\n";
-      optimizer_actor->zero_grad();
-      optimizer_critic = std::make_shared<torch::optim::Adam>(critic_net->parameters(), torch::optim::AdamOptions(alpha_actor));
-      optimizer_critic->zero_grad();
-      std::cout << "there\n";
+  CoreLoopFunctions::Init(t_tree);
+  TConfigurationNode cParametersNode;
+  cParametersNode = GetNode(t_tree, "params");
 
-      for (const auto& named_param : critic_net->named_parameters()) {
-          if (named_param.value().requires_grad()) {
-              eligibility_trace_critic[named_param.key()] = torch::zeros_like(named_param.value()).to(device);
-          }
-      }
-      std::cout << "there\n";
+  GetNodeAttribute(cParametersNode, "number_robots", nb_robots);
+  GetNodeAttribute(cParametersNode, "actor_type", actor_type);
 
-      for (const auto& named_param : actor_net->named_parameters()) {
-          if (named_param.value().requires_grad()) {
-              eligibility_trace_actor[named_param.key()] = torch::zeros_like(named_param.value()).to(device);
-          }
-      }
+  TConfigurationNode criticParameters;
+  criticParameters = GetNode(t_tree, "critic");
+  
+  GetNodeAttribute(criticParameters, "input_dim", critic_input_dim);
+  // critic_input_dim *= nb_robots;
+  GetNodeAttribute(criticParameters, "hidden_dim", critic_hidden_dim);
+  GetNodeAttribute(criticParameters, "num_hidden_layers", critic_num_hidden_layers);
+  GetNodeAttribute(criticParameters, "output_dim", critic_output_dim);
+  GetNodeAttribute(criticParameters, "lambda_critic", lambda_critic);
+  GetNodeAttribute(criticParameters, "alpha_critic", alpha_critic);
+  GetNodeAttribute(criticParameters, "gamma", gamma);
+  GetNodeAttribute(criticParameters, "device", device_type);
+  device = (device_type == "cuda") ? torch::kCUDA : torch::kCPU;
 
-      TDerrors.resize(mission_lengh);
-      std::fill(TDerrors.begin(), TDerrors.end(), 0.0f);
+  TConfigurationNode actorParameters;
+  argos::TConfigurationNode& parentNode = *dynamic_cast<argos::TConfigurationNode*>(t_tree.Parent());
+  TConfigurationNode controllerNode;
+  TConfigurationNode actorNode;
+  controllerNode = GetNode(parentNode, "controllers");
+  actorNode = GetNode(controllerNode, actor_type + "_controller");
+  actorParameters = GetNode(actorNode, "actor");
+  GetNodeAttribute(actorParameters, "input_dim", actor_input_dim);
+  GetNodeAttribute(actorParameters, "hidden_dim", actor_hidden_dim);
+  GetNodeAttribute(actorParameters, "num_hidden_layers", actor_num_hidden_layers);
+  GetNodeAttribute(actorParameters, "output_dim", actor_output_dim);
+  GetNodeAttribute(actorParameters, "lambda_actor", lambda_actor);
+  GetNodeAttribute(actorParameters, "alpha_actor", alpha_actor);
+  GetNodeAttribute(actorParameters, "entropy", entropy_fact);
 
-      Entropies.resize(mission_lengh);
-      std::fill(Entropies.begin(), Entropies.end(), 0.0f);
+  TConfigurationNode frameworkNode;
+  TConfigurationNode experimentNode;
+  frameworkNode = GetNode(parentNode, "framework");
+  experimentNode = GetNode(frameworkNode, "experiment");
+  GetNodeAttribute(experimentNode, "length", mission_lengh);
 
-      critic_losses.resize(mission_lengh);
-      std::fill(critic_losses.begin(), critic_losses.end(), 0.0f);
+  // std::cout << "actor param: " << actor_net->parameters() << std::endl;;
+  // try{
+  //     optimizer_actor = std::make_shared<torch::optim::Adam>(actor_net->parameters(), torch::optim::AdamOptions(alpha_critic));
+  //     std::cout << "here\n";
+  //     optimizer_actor->zero_grad();
+  //     optimizer_critic = std::make_shared<torch::optim::Adam>(critic_net->parameters(), torch::optim::AdamOptions(alpha_actor));
+  //     optimizer_critic->zero_grad();
+  //     std::cout << "there\n";
 
-      actor_losses.resize(mission_lengh);
-      std::fill(actor_losses.begin(), actor_losses.end(), 0.0f);
+  //     for (const auto& named_param : critic_net->named_parameters()) {
+  //         if (named_param.value().requires_grad()) {
+  //             eligibility_trace_critic[named_param.key()] = torch::zeros_like(named_param.value()).to(device);
+  //         }
+  //     }
+  //     std::cout << "there\n";
 
-      I = 1;
-  }catch (std::exception &ex) {
-    LOGERR << "Error in controller: " << ex.what() << std::endl;
-  }
+  //     for (const auto& named_param : actor_net->named_parameters()) {
+  //         if (named_param.value().requires_grad()) {
+  //             eligibility_trace_actor[named_param.key()] = torch::zeros_like(named_param.value()).to(device);
+  //         }
+  //     }
+
+  //     TDerrors.resize(mission_lengh);
+  //     std::fill(TDerrors.begin(), TDerrors.end(), 0.0f);
+
+  //     Entropies.resize(mission_lengh);
+  //     std::fill(Entropies.begin(), Entropies.end(), 0.0f);
+
+  //     critic_losses.resize(mission_lengh);
+  //     std::fill(critic_losses.begin(), critic_losses.end(), 0.0f);
+
+  //     actor_losses.resize(mission_lengh);
+  //     std::fill(actor_losses.begin(), actor_losses.end(), 0.0f);
+
+  //     I = 1;
+  // }catch (std::exception &ex) {
+  //   LOGERR << "Error in controller: " << ex.what() << std::endl;
+  // }
   
 }
 
@@ -142,7 +191,6 @@ argos::CColor AACLoopFunction::GetFloorColor(const argos::CVector2& c_position_o
 /****************************************/
 
 void AACLoopFunction::PreStep() {
-  std::cout << "Prestep\n";
   int N = (critic_input_dim - 4)/5; // Number of closest neighbors to consider (4 absolute states + 5 relative states)
   at::Tensor grid = torch::zeros({50, 50});
   std::vector<torch::Tensor> positions;
