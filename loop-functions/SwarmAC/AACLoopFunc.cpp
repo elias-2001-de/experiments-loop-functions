@@ -9,6 +9,7 @@
   */
 
 #include "AACLoopFunc.h"
+#include <cuda_runtime.h>
 
 /****************************************/
 /****************************************/
@@ -45,20 +46,28 @@ void AACLoopFunction::Reset() {
   optimizer_actor = std::make_shared<torch::optim::Adam>(actor_net->parameters(), torch::optim::AdamOptions(alpha_critic));
   optimizer_critic = std::make_shared<torch::optim::Adam>(critic_net->parameters(), torch::optim::AdamOptions(alpha_actor));
 
+  // Clear existing eligibility traces and initialize them on the device
+  eligibility_trace_critic.clear();
+  eligibility_trace_actor.clear();
+
   for (const auto& named_param : critic_net->named_parameters()) {
       if (named_param.value().requires_grad()) {
-          // std::cout << "eligibility loop\n";
-          // std::cout << "named_param.key() : " << named_param.key() << std::endl;
-          // std::cout << "eligibility_trace_critic[named_param.key()] : " << eligibility_trace_critic[named_param.key()] << std::endl;
-          eligibility_trace_critic[named_param.key()] = torch::zeros_like(named_param.value()).to(device);
-          // std::cout << "after eligibility loop\n";
+          try {
+              eligibility_trace_critic[named_param.key()] = torch::zeros_like(named_param.value()).to(device);
+          } catch (const std::exception& ex) {
+              std::cerr << "Error while initializing eligibility_trace_critic for " << named_param.key() << ": " << ex.what() << std::endl;
+          }
       }
   }
 
   for (const auto& named_param : actor_net->named_parameters()) {
-      if (named_param.value().requires_grad()) {
-          eligibility_trace_actor[named_param.key()] = torch::zeros_like(named_param.value()).to(device);
-      }
+    if (named_param.value().requires_grad()) {
+        try {
+            eligibility_trace_actor[named_param.key()] = torch::zeros_like(named_param.value()).to(device);
+        } catch (const std::exception& ex) {
+            std::cerr << "Error while initializing eligibility_trace_actor for " << named_param.key() << ": " << ex.what() << std::endl;
+        }
+    }
   }
 
   optimizer_critic->zero_grad();
@@ -79,7 +88,6 @@ void AACLoopFunction::Reset() {
   std::fill(actor_losses.begin(), actor_losses.end(), 0.0f);
 
   CoreLoopFunctions::Reset();
-
 }
 
 /****************************************/
@@ -127,46 +135,7 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
   frameworkNode = GetNode(parentNode, "framework");
   experimentNode = GetNode(frameworkNode, "experiment");
   GetNodeAttribute(experimentNode, "length", mission_lengh);
-
-  // std::cout << "actor param: " << actor_net->parameters() << std::endl;;
-  // try{
-  //     optimizer_actor = std::make_shared<torch::optim::Adam>(actor_net->parameters(), torch::optim::AdamOptions(alpha_critic));
-  //     std::cout << "here\n";
-  //     optimizer_actor->zero_grad();
-  //     optimizer_critic = std::make_shared<torch::optim::Adam>(critic_net->parameters(), torch::optim::AdamOptions(alpha_actor));
-  //     optimizer_critic->zero_grad();
-  //     std::cout << "there\n";
-
-  //     for (const auto& named_param : critic_net->named_parameters()) {
-  //         if (named_param.value().requires_grad()) {
-  //             eligibility_trace_critic[named_param.key()] = torch::zeros_like(named_param.value()).to(device);
-  //         }
-  //     }
-  //     std::cout << "there\n";
-
-  //     for (const auto& named_param : actor_net->named_parameters()) {
-  //         if (named_param.value().requires_grad()) {
-  //             eligibility_trace_actor[named_param.key()] = torch::zeros_like(named_param.value()).to(device);
-  //         }
-  //     }
-
-  //     TDerrors.resize(mission_lengh);
-  //     std::fill(TDerrors.begin(), TDerrors.end(), 0.0f);
-
-  //     Entropies.resize(mission_lengh);
-  //     std::fill(Entropies.begin(), Entropies.end(), 0.0f);
-
-  //     critic_losses.resize(mission_lengh);
-  //     std::fill(critic_losses.begin(), critic_losses.end(), 0.0f);
-
-  //     actor_losses.resize(mission_lengh);
-  //     std::fill(actor_losses.begin(), actor_losses.end(), 0.0f);
-
-  //     I = 1;
-  // }catch (std::exception &ex) {
-  //   LOGERR << "Error in controller: " << ex.what() << std::endl;
-  // }
-  
+  mission_lengh *= 10;
 }
 
 /****************************************/
@@ -191,6 +160,7 @@ argos::CColor AACLoopFunction::GetFloorColor(const argos::CVector2& c_position_o
 /****************************************/
 
 void AACLoopFunction::PreStep() {
+  //std::cout << "Presetp\n";
   int N = (critic_input_dim - 4)/5; // Number of closest neighbors to consider (4 absolute states + 5 relative states)
   at::Tensor grid = torch::zeros({50, 50});
   std::vector<torch::Tensor> positions;

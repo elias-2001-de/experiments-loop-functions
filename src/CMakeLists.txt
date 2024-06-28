@@ -19,6 +19,12 @@ endif(ARGOS_BUILD_FOR_SIMULATOR)
 
 
 add_library(argos3_demiurge_loop_functions SHARED ${LOOP_HEADERS} ${LOOP_SOURCES} )
+
+# Set C++17 standard for the target
+set_property(TARGET argos3_demiurge_loop_functions PROPERTY CXX_STANDARD 17)
+set_property(TARGET argos3_demiurge_loop_functions PROPERTY CXX_STANDARD_REQUIRED ON)
+set_property(TARGET argos3_demiurge_loop_functions PROPERTY CXX_EXTENSIONS OFF)
+
 target_link_libraries(argos3_demiurge_loop_functions argos3plugin_${ARGOS_BUILD_FOR}_epuck ${TORCH_LIBRARIES})
 
 install(
