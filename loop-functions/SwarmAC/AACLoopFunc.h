@@ -60,6 +60,7 @@ class AACLoopFunction : public CoreLoopFunctions {
       float GetCriticLoss();
       float GetActorLoss();
       float GetEntropy();
+      std::vector<float> GetBehavHist();
 
       std::vector<RelativePosition> compute_relative_positions(const CVector2& base_position, const CRadians& base_yaw, const std::vector<std::pair<CVector2, CRadians>>& all_positions);
 
@@ -84,7 +85,7 @@ class AACLoopFunction : public CoreLoopFunctions {
 
       // Get the time step
       int fTimeStep;
-      int mission_lengh;
+      int mission_length;
 
       // Network
       int critic_input_dim;
@@ -137,6 +138,7 @@ class AACLoopFunction : public CoreLoopFunctions {
       std::vector<float> Entropies;
       std::vector<float> critic_losses;
       std::vector<float> actor_losses;
+      std::vector<float> behav_hist;
 };
 
 #endif

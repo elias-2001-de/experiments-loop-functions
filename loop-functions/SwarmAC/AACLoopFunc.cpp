@@ -40,11 +40,9 @@ void AACLoopFunction::Destroy() {}
 /****************************************/
 
 void AACLoopFunction::Reset() {
+  //std::cout << "RESET\n";
   m_fObjectiveFunction = 0;
   fTimeStep = 0;
-
-  optimizer_actor = std::make_shared<torch::optim::Adam>(actor_net->parameters(), torch::optim::AdamOptions(alpha_critic));
-  optimizer_critic = std::make_shared<torch::optim::Adam>(critic_net->parameters(), torch::optim::AdamOptions(alpha_actor));
 
   // Clear existing eligibility traces and initialize them on the device
   eligibility_trace_critic.clear();
@@ -70,22 +68,27 @@ void AACLoopFunction::Reset() {
     }
   }
 
+  optimizer_actor = std::make_shared<torch::optim::Adam>(actor_net->parameters(), torch::optim::AdamOptions(alpha_critic));
+  optimizer_critic = std::make_shared<torch::optim::Adam>(critic_net->parameters(), torch::optim::AdamOptions(alpha_actor));
   optimizer_critic->zero_grad();
   optimizer_actor->zero_grad();
 
   I = 1;
 
-  TDerrors.resize(mission_lengh);
+  TDerrors.resize(mission_length);
   std::fill(TDerrors.begin(), TDerrors.end(), 0.0f);
 
-  Entropies.resize(mission_lengh);
+  Entropies.resize(mission_length);
   std::fill(Entropies.begin(), Entropies.end(), 0.0f);
 
-  critic_losses.resize(mission_lengh);
+  critic_losses.resize(mission_length);
   std::fill(critic_losses.begin(), critic_losses.end(), 0.0f);
 
-  actor_losses.resize(mission_lengh);
+  actor_losses.resize(mission_length);
   std::fill(actor_losses.begin(), actor_losses.end(), 0.0f);
+
+  behav_hist.resize(6);
+  std::fill(behav_hist.begin(), behav_hist.end(), 0.0f);
 
   CoreLoopFunctions::Reset();
 }
@@ -94,6 +97,7 @@ void AACLoopFunction::Reset() {
 /****************************************/
 
 void AACLoopFunction::Init(TConfigurationNode& t_tree) {
+  //std::cout << "INIT\n";
   CoreLoopFunctions::Init(t_tree);
   TConfigurationNode cParametersNode;
   cParametersNode = GetNode(t_tree, "params");
@@ -134,8 +138,8 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
   TConfigurationNode experimentNode;
   frameworkNode = GetNode(parentNode, "framework");
   experimentNode = GetNode(frameworkNode, "experiment");
-  GetNodeAttribute(experimentNode, "length", mission_lengh);
-  mission_lengh *= 10;
+  GetNodeAttribute(experimentNode, "length", mission_length);
+  mission_length *= 10;
 }
 
 /****************************************/
@@ -270,7 +274,6 @@ void AACLoopFunction::PreStep() {
         {
           states_prime.push_back(state.clone());
         }
-
         torch::Tensor state_batch = torch::stack(states).to(device);
         torch::Tensor next_state_batch = torch::stack(states_prime).to(device);
 
@@ -280,7 +283,7 @@ void AACLoopFunction::PreStep() {
         
 
         // Adjust for the terminal state
-        if (fTimeStep + 1 == mission_lengh) {
+        if (fTimeStep + 1 == mission_length) {
             v_state_prime = torch::zeros_like(v_state_prime);
         }
 
@@ -318,6 +321,8 @@ void AACLoopFunction::PreStep() {
           CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
           log_probs.push_back(cController.GetPolicyLogProbs().to(device)); 
           entropies.push_back(cController.GetPolicyEntropy().to(device)); 
+          int selected_module = cController.GetSelectedModule();
+          behav_hist[selected_module] += 1;
         }
 
         // Calculate policy loss using the per-robot TD error times the logprob
@@ -457,6 +462,23 @@ float AACLoopFunction::GetCriticLoss() {
   float sum = std::accumulate(critic_losses.begin(), critic_losses.end(), 0.0f);
   float average = sum / critic_losses.size();
   return average;
+}
+
+/****************************************/
+/****************************************/
+
+std::vector<float> AACLoopFunction::GetBehavHist() {
+  //Calculate the sum of all elements
+  float sum = std::accumulate(behav_hist.begin(), behav_hist.end(), 0.0f);
+
+  //Convert each element to percentage
+  if (sum != 0.0f) { 
+      for (auto& elem : behav_hist) {
+          elem = (elem / sum) * 100.0f;
+      }
+  }
+
+  return behav_hist;
 }
 
 /****************************************/

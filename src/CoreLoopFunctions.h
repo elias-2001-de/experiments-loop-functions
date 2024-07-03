@@ -134,6 +134,7 @@ class CoreLoopFunctions: public CLoopFunctions {
     virtual float GetCriticLoss() = 0;
     virtual float GetActorLoss() = 0;
     virtual float GetEntropy() = 0;
+    virtual std::vector<float> GetBehavHist() = 0;
 
     /*
      * Return a random position.
