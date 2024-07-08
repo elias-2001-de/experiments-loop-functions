@@ -87,7 +87,7 @@ void AACLoopFunction::Reset() {
   actor_losses.resize(mission_length);
   std::fill(actor_losses.begin(), actor_losses.end(), 0.0f);
 
-  behav_hist.resize(6);
+  behav_hist.resize(actor_output_dim);
   std::fill(behav_hist.begin(), behav_hist.end(), 0.0f);
 
   CoreLoopFunctions::Reset();
