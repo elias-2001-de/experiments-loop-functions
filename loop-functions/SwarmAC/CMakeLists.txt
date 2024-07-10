@@ -1,20 +1,12 @@
 find_package(Torch REQUIRED)
-# find cppzmq
-find_package(cppzmq)
 
 add_library(swarmac_loopfunc SHARED
-                        #   Homing.h
-                        #   Homing.cpp
-                        #   HomingTest.h
-                        #   HomingTest.cpp
-                        #   AggregationTwoSpotsXOR2.h
-                        #   AggregationTwoSpotsXOR2.cpp
                           AACLoopFunc.h
                           AACLoopFunc.cpp
+                          SCALoopFunc.h
+                          SCALoopFunc.cpp
                           Corridor.h
                           Corridor.cpp
-                        #   AACTestLoopFunc.h
-                        #   AACTestLoopFunc.cpp
                           ${LOOP_HEADERS}
                           ${LOOP_SOURCES})
 
@@ -25,8 +17,7 @@ set_property(TARGET swarmac_loopfunc PROPERTY CXX_EXTENSIONS OFF)
 
 target_link_libraries(swarmac_loopfunc 
 			${TORCH_LIBRARIES} 
-			argos3plugin_${ARGOS_BUILD_FOR}_epuck 
-			cppzmq)
+			argos3plugin_${ARGOS_BUILD_FOR}_epuck)
 
 # Set debug and release flags
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g -fsanitize=address")

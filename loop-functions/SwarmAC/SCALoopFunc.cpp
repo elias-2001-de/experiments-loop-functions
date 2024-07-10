@@ -1,57 +1,41 @@
 /**
-  * @file <loop-functions/example/Corridor.cpp>
+  * @file <loop-functions/example/ShelterConstrainedAccessLoopFunc.cpp>
   *
-  * @author Ilyes Gharbi - <ilyes.gharbi@ulb.be>
+  * @author Antoine Ligot - <aligot@ulb.ac.be>
   *
   * @package ARGoS3-AutoMoDe
   *
   * @license MIT License
   */
 
-#include "Corridor.h"
-#include <cuda_runtime.h>
+#include "SCALoopFunc.h"
 
 /****************************************/
 /****************************************/
 
-Corridor::Corridor() {
-  Rectangle blackRect;
-  blackRect.center = CVector2(0,0);
-  blackRect.angle = 0;
-  blackRect.width = 0.375;
-  blackRect.height = 0.5;
-  blackRect.color = "black";
-  lRectangles.push_back(blackRect);
+SCALoopFunction::SCALoopFunction() {
 
-  Rectangle whiteRect;
-  whiteRect.center = CVector2(0,-0.75);
-  whiteRect.angle = 0;
-  whiteRect.width = 0.75;
-  whiteRect.height = 0.5;
-  whiteRect.color = "white";
-  lRectangles.push_back(whiteRect);
 }
 
 /****************************************/
 /****************************************/
 
-Corridor::Corridor(const Corridor& orig) {}
+SCALoopFunction::SCALoopFunction(const SCALoopFunction& orig) {}
 
 /****************************************/
 /****************************************/
 
-Corridor::~Corridor() {}
+SCALoopFunction::~SCALoopFunction() {}
+
+/****************************************/
+
+/****************************************/
+void SCALoopFunction::Destroy() {}
 
 /****************************************/
 /****************************************/
 
-void Corridor::Destroy() {}
-
-/****************************************/
-/****************************************/
-
-void Corridor::Reset() {
-  //std::cout << "RESET\n";
+void SCALoopFunction::Reset() {
   m_fObjectiveFunction = 0;
   fTimeStep = 0;
 
@@ -107,56 +91,53 @@ void Corridor::Reset() {
 /****************************************/
 /****************************************/
 
-void Corridor::Init(TConfigurationNode& t_tree) {
-  //std::cout << "INIT\n";
+void SCALoopFunction::Init(TConfigurationNode& t_tree) {
+    // Parsing all floor circles
+    TConfigurationNodeIterator it_circle("circle");
+    TConfigurationNode circleParameters;
+    try{
+      // Finding all floor circle
+      for ( it_circle = it_circle.begin( &t_tree ); it_circle != it_circle.end(); it_circle++ )
+      {
+          circleParameters = *it_circle;
+          Circle c;
+          GetNodeAttribute(circleParameters, "position", c.center);
+          GetNodeAttribute(circleParameters, "radius", c.radius);
+          GetNodeAttribute(circleParameters, "color", c.color);
+          lCircles.push_back(c);
+      }
+      LOG << "number of floor circle: " << lCircles.size() << std::endl;
+    } catch(std::exception e) {
+      LOGERR << "Problem while searching floor circles" << std::endl;
+    }
+
+    // Parsing all floor rectangles
+    TConfigurationNodeIterator it_rect("rectangle");
+    TConfigurationNode rectParameters;
+    try{
+      // Finding all floor circle
+      for ( it_rect = it_rect.begin( &t_tree ); it_rect != it_rect.end(); it_rect++ )
+      {
+          rectParameters = *it_rect;
+          Rectangle r;
+          GetNodeAttribute(rectParameters, "center", r.center);
+          GetNodeAttribute(rectParameters, "angle", r.angle);
+          GetNodeAttribute(rectParameters, "width", r.width);
+          GetNodeAttribute(rectParameters, "height", r.height);
+          GetNodeAttribute(rectParameters, "color", r.color);
+          lRectangles.push_back(r);
+      }
+      LOG << "number of floor rectangles: " << lRectangles.size() << std::endl;
+    } catch(std::exception e) {
+      LOGERR << "Problem while searching floor circles" << std::endl;
+    }
   CoreLoopFunctions::Init(t_tree);
-  TConfigurationNode cParametersNode;
-  cParametersNode = GetNode(t_tree, "params");
-
-  GetNodeAttribute(cParametersNode, "number_robots", nb_robots);
-  GetNodeAttribute(cParametersNode, "actor_type", actor_type);
-
-  TConfigurationNode criticParameters;
-  criticParameters = GetNode(t_tree, "critic");
-  
-  GetNodeAttribute(criticParameters, "input_dim", critic_input_dim);
-  // critic_input_dim *= nb_robots;
-  GetNodeAttribute(criticParameters, "hidden_dim", critic_hidden_dim);
-  GetNodeAttribute(criticParameters, "num_hidden_layers", critic_num_hidden_layers);
-  GetNodeAttribute(criticParameters, "output_dim", critic_output_dim);
-  GetNodeAttribute(criticParameters, "lambda_critic", lambda_critic);
-  GetNodeAttribute(criticParameters, "alpha_critic", alpha_critic);
-  GetNodeAttribute(criticParameters, "gamma", gamma);
-  GetNodeAttribute(criticParameters, "device", device_type);
-  device = (device_type == "cuda") ? torch::kCUDA : torch::kCPU;
-
-  TConfigurationNode actorParameters;
-  argos::TConfigurationNode& parentNode = *dynamic_cast<argos::TConfigurationNode*>(t_tree.Parent());
-  TConfigurationNode controllerNode;
-  TConfigurationNode actorNode;
-  controllerNode = GetNode(parentNode, "controllers");
-  actorNode = GetNode(controllerNode, actor_type + "_controller");
-  actorParameters = GetNode(actorNode, "actor");
-  GetNodeAttribute(actorParameters, "input_dim", actor_input_dim);
-  GetNodeAttribute(actorParameters, "hidden_dim", actor_hidden_dim);
-  GetNodeAttribute(actorParameters, "num_hidden_layers", actor_num_hidden_layers);
-  GetNodeAttribute(actorParameters, "output_dim", actor_output_dim);
-  GetNodeAttribute(actorParameters, "lambda_actor", lambda_actor);
-  GetNodeAttribute(actorParameters, "alpha_actor", alpha_actor);
-  GetNodeAttribute(actorParameters, "entropy", entropy_fact);
-
-  TConfigurationNode frameworkNode;
-  TConfigurationNode experimentNode;
-  frameworkNode = GetNode(parentNode, "framework");
-  experimentNode = GetNode(frameworkNode, "experiment");
-  GetNodeAttribute(experimentNode, "length", mission_length);
-  mission_length *= 10;
 }
 
 /****************************************/
 /****************************************/
 
-argos::CColor Corridor::GetFloorColor(const argos::CVector2& c_position_on_plane) {
+argos::CColor SCALoopFunction::GetFloorColor(const argos::CVector2& c_position_on_plane) {
   CVector2 vCurrentPoint(c_position_on_plane.GetX(), c_position_on_plane.GetY());
   if (IsOnColor(vCurrentPoint, "black")) {
     return CColor::BLACK;
@@ -174,7 +155,7 @@ argos::CColor Corridor::GetFloorColor(const argos::CVector2& c_position_on_plane
 /****************************************/
 /****************************************/
 
-bool Corridor::IsOnColor(CVector2& c_position_on_plane, std::string color) {
+bool SCALoopFunction::IsOnColor(CVector2& c_position_on_plane, std::string color) {
   // checking floor circles
   for (Circle c : lCircles) 
   {
@@ -193,7 +174,7 @@ bool Corridor::IsOnColor(CVector2& c_position_on_plane, std::string color) {
   {
     if (r.color == color)
     {
-      Real phi = std::atan(r.width/r.height);
+      Real phi = std::atan(r.height/r.width);
       Real theta = r.angle * (M_PI/180);
       Real hyp = std::sqrt((r.width*r.width) + (r.height*r.height));
       // compute position of three corner of the rectangle
@@ -221,7 +202,7 @@ bool Corridor::IsOnColor(CVector2& c_position_on_plane, std::string color) {
 /****************************************/
 /****************************************/
 
-void Corridor::PreStep() {
+void SCALoopFunction::PreStep() {
   int N = (critic_input_dim - 4)/5; // Number of closest neighbors to consider (4 absolute states + 5 relative states)
   std::vector<torch::Tensor> positions;
   CSpace::TMapPerType& tEpuckMap = GetSpace().GetEntitiesByType("epuck");
@@ -278,7 +259,7 @@ void Corridor::PreStep() {
 
     // Reward computation
     float reward = 0.0;
-    if (IsOnColor(cEpuckPosition, "black")) {
+    if (IsOnColor(cEpuckPosition, "white")) {
       reward = 1.0;
     } else {
       reward = 0;//std::pow(10, -3 * fDistanceSpot / m_fDistributionRadius);
@@ -432,12 +413,12 @@ void Corridor::PreStep() {
 /****************************************/
 /****************************************/
 
-void Corridor::PostStep() {}
+void SCALoopFunction::PostStep() {}
 
 /****************************************/
 /****************************************/
 
-void Corridor::PostExperiment() {
+void SCALoopFunction::PostExperiment() {
   LOG << "Time = " << fTimeStep << std::endl;
   LOG << "Score = " << m_fObjectiveFunction << std::endl;
 }
@@ -445,14 +426,14 @@ void Corridor::PostExperiment() {
 /****************************************/
 /****************************************/
 
-Real Corridor::GetObjectiveFunction() {
+Real SCALoopFunction::GetObjectiveFunction() {
   return m_fObjectiveFunction;
 }
 
 /****************************************/
 /****************************************/
 
-float Corridor::GetTDError() {
+float SCALoopFunction::GetTDError() {
   float sum = std::accumulate(TDerrors.begin(), TDerrors.end(), 0.0f);
   float average = sum / TDerrors.size();
   return average;
@@ -461,7 +442,7 @@ float Corridor::GetTDError() {
 /****************************************/
 /****************************************/
 
-float Corridor::GetEntropy() {
+float SCALoopFunction::GetEntropy() {
   float sum = std::accumulate(Entropies.begin(), Entropies.end(), 0.0f);
   float average = sum / Entropies.size();
   return average;
@@ -470,7 +451,7 @@ float Corridor::GetEntropy() {
 /****************************************/
 /****************************************/
 
-float Corridor::GetActorLoss() {
+float SCALoopFunction::GetActorLoss() {
   float sum = std::accumulate(actor_losses.begin(), actor_losses.end(), 0.0f);
   float average = sum / actor_losses.size();
   return average;
@@ -480,7 +461,7 @@ float Corridor::GetActorLoss() {
 /****************************************/
 /****************************************/
 
-float Corridor::GetCriticLoss() {
+float SCALoopFunction::GetCriticLoss() {
   float sum = std::accumulate(critic_losses.begin(), critic_losses.end(), 0.0f);
   float average = sum / critic_losses.size();
   return average;
@@ -489,7 +470,7 @@ float Corridor::GetCriticLoss() {
 /****************************************/
 /****************************************/
 
-std::vector<float> Corridor::GetBehavHist() {
+std::vector<float> SCALoopFunction::GetBehavHist() {
   //Calculate the sum of all elements
   float sum = std::accumulate(behav_hist.begin(), behav_hist.end(), 0.0f);
 
@@ -506,7 +487,7 @@ std::vector<float> Corridor::GetBehavHist() {
 /****************************************/
 /****************************************/
 
-std::vector<RelativePosition> Corridor::compute_relative_positions(const CVector2& base_position, const CRadians& base_yaw, const std::vector<std::pair<CVector2, CRadians>>& all_positions) {
+std::vector<RelativePosition> SCALoopFunction::compute_relative_positions(const CVector2& base_position, const CRadians& base_yaw, const std::vector<std::pair<CVector2, CRadians>>& all_positions) {
   std::vector<RelativePosition> relative_positions;
   for (const auto& pos : all_positions) {
     float dx = pos.first.GetX() - base_position.GetX();
@@ -523,7 +504,7 @@ std::vector<RelativePosition> Corridor::compute_relative_positions(const CVector
 /****************************************/
 /****************************************/
 
-CVector3 Corridor::GetRandomPosition() {
+CVector3 SCALoopFunction::GetRandomPosition() {
   Real temp;
   Real a = m_pcRng->Uniform(CRange<Real>(0.0f, 1.0f));
   Real b = m_pcRng->Uniform(CRange<Real>(0.0f, 1.0f));
@@ -537,8 +518,8 @@ CVector3 Corridor::GetRandomPosition() {
 /****************************************/
 /****************************************/
 
-void Corridor::SetTraining(bool value) {
+void SCALoopFunction::SetTraining(bool value) {
     training = value;
 }
 
-REGISTER_LOOP_FUNCTIONS(Corridor, "corridor");
+REGISTER_LOOP_FUNCTIONS(SCALoopFunction, "sca_loop_functions");

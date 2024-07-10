@@ -18,9 +18,6 @@ AACLoopFunction::AACLoopFunction() {
   m_fRadius = 0.3;
   m_cCoordBlackSpot = CVector2(0,-0.6);
   m_cCoordWhiteSpot = CVector2(0,0.6);
-  // m_fRadius = 0.7;
-  // m_cCoordBlackSpot = CVector2(0,-1);
-  // m_fObjectiveFunction = 0;
 }
 
 /****************************************/
@@ -42,7 +39,6 @@ void AACLoopFunction::Destroy() {}
 /****************************************/
 
 void AACLoopFunction::Reset() {
-  // std::cout << "RESET\n";
   m_fObjectiveFunction = 0;
   fTimeStep = 0;
 
@@ -99,7 +95,6 @@ void AACLoopFunction::Reset() {
 /****************************************/
 
 void AACLoopFunction::Init(TConfigurationNode& t_tree) {
-  //std::cout << "INIT\n";
   CoreLoopFunctions::Init(t_tree);
   TConfigurationNode cParametersNode;
   cParametersNode = GetNode(t_tree, "params");
@@ -111,7 +106,6 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
   criticParameters = GetNode(t_tree, "critic");
   
   GetNodeAttribute(criticParameters, "input_dim", critic_input_dim);
-  // critic_input_dim *= nb_robots;
   GetNodeAttribute(criticParameters, "hidden_dim", critic_hidden_dim);
   GetNodeAttribute(criticParameters, "num_hidden_layers", critic_num_hidden_layers);
   GetNodeAttribute(criticParameters, "output_dim", critic_output_dim);
@@ -154,10 +148,10 @@ argos::CColor AACLoopFunction::GetFloorColor(const argos::CVector2& c_position_o
     return CColor::BLACK;
   }
 
-  // d = (m_cCoordWhiteSpot - vCurrentPoint).Length();
-  // if (d <= m_fRadius) {
-  //   return CColor::WHITE;
-  // }
+  d = (m_cCoordWhiteSpot - vCurrentPoint).Length();
+  if (d <= m_fRadius) {
+    return CColor::WHITE;
+  }
 
   return CColor::GRAY50;
 }
@@ -166,9 +160,7 @@ argos::CColor AACLoopFunction::GetFloorColor(const argos::CVector2& c_position_o
 /****************************************/
 
 void AACLoopFunction::PreStep() {
-  //std::cout << "Presetp\n";
   int N = (critic_input_dim - 4)/5; // Number of closest neighbors to consider (4 absolute states + 5 relative states)
-  // at::Tensor grid = torch::zeros({50, 50});
   std::vector<torch::Tensor> positions;
   CSpace::TMapPerType& tEpuckMap = GetSpace().GetEntitiesByType("epuck");
   CVector2 cEpuckPosition(0,0), other_position(0,0);
@@ -232,10 +224,6 @@ void AACLoopFunction::PreStep() {
     }
     rewards.push_back(torch::tensor(reward));
     m_fObjectiveFunction += reward;
-
-    // int grid_x = static_cast<int>(std::round((-cEpuckPosition.GetY() + 1.231) / 2.462 * 49));
-    // int grid_y = static_cast<int>(std::round((cEpuckPosition.GetX() + 1.231) / 2.462 * 49));
-    // grid[grid_x][grid_y] = 1;
   }
   
   if (fTimeStep == 0)
@@ -256,8 +244,6 @@ void AACLoopFunction::PreStep() {
       try {
         CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
         cController.SetNetworkAndOptimizer(actor_net, optimizer_actor, device_type);
-        // std::cout << "state " << i << " : " <<  states[i] << std::endl;
-        // cController.SetGlobalState(states[i]);
         i++;
       } catch (std::exception &ex) {
         LOGERR << "Error while setting network: " << ex.what() << std::endl;
@@ -265,7 +251,6 @@ void AACLoopFunction::PreStep() {
     }
 
     fTimeStep += 1;
-    // std::cout << "Step: " << fTimeStep << std::endl;
   
   }else
   {
@@ -387,32 +372,7 @@ void AACLoopFunction::PreStep() {
 /****************************************/
 /****************************************/
 
-void AACLoopFunction::PostStep() {
-  // if(!training){
-  //   // place spot in grid
-  //   int grid_x = static_cast<int>(std::round((m_cCoordBlackSpot.GetX() + 1.231) / 2.462 * 49));
-  //   int grid_y = static_cast<int>(std::round((-m_cCoordBlackSpot.GetY() + 1.231) / 2.462 * 49));
-  //   int radius = static_cast<int>(std::round(m_fRadius / 2.462 * 49));
-  //   // Print arena on the terminal
-  //   auto temp1 = grid[grid_x][grid_y];
-  //   auto temp2 = grid[grid_x+radius][grid_y];
-  //   auto temp3 = grid[grid_x-radius][grid_y];
-  //   auto temp4 = grid[grid_x][grid_y+radius];
-  //   auto temp5 = grid[grid_x][grid_y-radius];
-  //   grid[grid_x][grid_y] = 2;
-  //   grid[grid_x+radius][grid_y] = 3;
-  //   grid[grid_x-radius][grid_y] = 3;
-  //   grid[grid_x][grid_y+radius] = 3;
-  //   grid[grid_x][grid_y-radius] = 3;
-  //   print_grid(grid, fTimeStep);
-  //   grid[grid_x][grid_y] = temp1;
-  //   grid[grid_x+radius][grid_y] = temp2;
-  //   grid[grid_x-radius][grid_y] = temp3;
-  //   grid[grid_x][grid_y+radius] = temp4;
-  //   grid[grid_x][grid_y-radius] = temp5;
-  // }
-  // std::cout << "Step: " << fTimeStep << std::endl;
-}
+void AACLoopFunction::PostStep() {}
 
 /****************************************/
 /****************************************/
@@ -521,85 +481,6 @@ CVector3 AACLoopFunction::GetRandomPosition() {
 
 /****************************************/
 /****************************************/
-
-// Function to compute the log-PDF of the Beta distribution
-double AACLoopFunction::computeBetaLogPDF(double alpha, double beta, double x) {
-    // Compute the logarithm of the Beta function
-    double logBeta = std::lgamma(alpha) + std::lgamma(beta) - std::lgamma(alpha + beta);
-
-    // Compute the log-PDF of the Beta distribution
-    double logPDF = (alpha - 1) * std::log(x) + (beta - 1) * std::log(1 - x) - logBeta;
-
-    return logPDF;
-}
-
-/****************************************/
-/****************************************/
-
-void AACLoopFunction::print_grid(at::Tensor grid, int step) {
-    std::stringstream buffer;
-    buffer << "\033[2J\033[1;1H"; // Clear screen and move cursor to top-left
-    buffer << "GRID State:\n";
-    
-    auto sizes = grid.sizes();
-    int rows = sizes[0];
-    int cols = sizes[1];
-    int dimension = std::max(rows, cols);
-    
-    // Calculate the scaling factors for rows and columns to achieve a square aspect ratio
-    float scale_row = static_cast<float>(dimension) / rows;
-    float scale_col = static_cast<float>(dimension) / cols;
-    
-    // Print the grid with layout
-    for (int y = 0; y < dimension; ++y) {
-        if (y % int(scale_row) == 0) {
-            for (int x = 0; x < dimension; ++x) {
-                buffer << "+---";
-            }
-            buffer << "+" << std::endl;
-        }
-        
-        for (int x = 0; x < dimension; ++x) {
-            if (x % int(scale_col) == 0) {
-                buffer << "|";
-            }
-            
-            int orig_x = static_cast<int>(x / scale_col);
-            int orig_y = static_cast<int>(y / scale_row);
-            
-            if (orig_x < cols && orig_y < rows) {
-                float value = grid[orig_y][orig_x].item<float>();
-                
-                if (value == 1) {
-                    buffer << " R ";
-                } else if (value == 2) {
-                    buffer << " C ";
-                } else if (value == 3) {
-                    buffer << " B ";
-                } else {
-                    buffer << "   ";
-                }
-            } else {
-                buffer << "   "; // Ensure consistent grid cell size
-            }
-        }
-        
-        buffer << "|\n"; // Complete the grid row
-    }
-    
-    // Print the bottom grid border
-    for (int x = 0; x < dimension; ++x) {
-        buffer << "+---";
-    }
-    buffer << "+\n";
-    buffer << "Time: " << step * 0.1 << " seconds" << std::endl;
-    
-    // Print the entire grid at once
-    std::cout << buffer.str();
-    std::cout.flush(); // Ensure the output is rendered immediately
-    
-    usleep(100000); // Sleep for 0.1 seconds (100,000 microseconds)
-}
 
 void AACLoopFunction::SetTraining(bool value) {
     training = value;

@@ -1,11 +1,11 @@
 /*
- * Corridor
+ * Shelter with Constrained Access
  *
- * @author Ilyes Gharbi - <ilyes.gharbi@ulb.be>
+ * @author Antoine Ligot - <aligot@ulb.ac.be>
  */
 
-#ifndef CORRIDOR
-#define CORRIDOR
+#ifndef SCA_LOOP_FUNC_H
+#define SCA_LOOP_FUNC_H
 
 #include <torch/torch.h>
 
@@ -39,12 +39,12 @@ struct RelativePosition {
 
 using namespace argos;
 
-class Corridor : public CoreLoopFunctions {
+class SCALoopFunction : public CoreLoopFunctions {
 
    public:
-      Corridor();
-      Corridor(const Corridor& orig);
-      virtual ~Corridor();
+      SCALoopFunction();
+      SCALoopFunction(const SCALoopFunction& orig);
+      virtual ~SCALoopFunction();
 
       virtual void Destroy();
       virtual void Init(TConfigurationNode& t_tree);

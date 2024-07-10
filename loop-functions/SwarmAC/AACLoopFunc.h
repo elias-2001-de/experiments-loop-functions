@@ -12,8 +12,6 @@
 #include <argos3/core/simulator/space/space.h>
 #include <argos3/plugins/robots/e-puck/simulator/epuck_entity.h>
 
-#include <zmq.hpp>
-
 #include <cmath>
 #include <unordered_map>
 
@@ -68,10 +66,6 @@ class AACLoopFunction : public CoreLoopFunctions {
 
       virtual CVector3 GetRandomPosition();
 
-      double computeBetaLogPDF(double alpha, double beta, double x);
-
-      void print_grid(at::Tensor grid, int step);
-
       virtual void SetTraining(bool value);
 
     private:
@@ -108,9 +102,6 @@ class AACLoopFunction : public CoreLoopFunctions {
     
       CRange<Real> m_cNeuralNetworkOutputRange;
       
-      // Define the Actor and Critic Nets
-    //   argos::CEpuckNNController::Dandel actor_net;
-
       // Learning variables
       std::unordered_map<std::string, torch::Tensor> eligibility_trace_critic;
       std::unordered_map<std::string, torch::Tensor> eligibility_trace_actor;
