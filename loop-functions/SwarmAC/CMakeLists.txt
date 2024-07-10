@@ -11,6 +11,8 @@ add_library(swarmac_loopfunc SHARED
                         #   AggregationTwoSpotsXOR2.cpp
                           AACLoopFunc.h
                           AACLoopFunc.cpp
+                          Corridor.h
+                          Corridor.cpp
                         #   AACTestLoopFunc.h
                         #   AACTestLoopFunc.cpp
                           ${LOOP_HEADERS}

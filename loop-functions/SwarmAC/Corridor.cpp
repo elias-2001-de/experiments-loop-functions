@@ -1,48 +1,57 @@
 /**
-  * @file <loop-functions/example/ChocolateAACLoopFunc.cpp>
+  * @file <loop-functions/example/Corridor.cpp>
   *
-  * @author Antoine Ligot - <aligot@ulb.ac.be>
+  * @author Ilyes Gharbi - <ilyes.gharbi@ulb.be>
   *
   * @package ARGoS3-AutoMoDe
   *
   * @license MIT License
   */
 
-#include "AACLoopFunc.h"
+#include "Corridor.h"
 #include <cuda_runtime.h>
 
 /****************************************/
 /****************************************/
 
-AACLoopFunction::AACLoopFunction() {
-  m_fRadius = 0.3;
-  m_cCoordBlackSpot = CVector2(0,-0.6);
-  m_cCoordWhiteSpot = CVector2(0,0.6);
-  // m_fRadius = 0.7;
-  // m_cCoordBlackSpot = CVector2(0,-1);
-  // m_fObjectiveFunction = 0;
+Corridor::Corridor() {
+  Rectangle blackRect;
+  blackRect.center = CVector2(0,0);
+  blackRect.angle = 0;
+  blackRect.width = 0.375;
+  blackRect.height = 0.5;
+  blackRect.color = "black";
+  lRectangles.push_back(blackRect);
+
+  Rectangle whiteRect;
+  whiteRect.center = CVector2(0,-0.75);
+  whiteRect.angle = 0;
+  whiteRect.width = 0.75;
+  whiteRect.height = 0.5;
+  whiteRect.color = "white";
+  lRectangles.push_back(whiteRect);
 }
 
 /****************************************/
 /****************************************/
 
-AACLoopFunction::AACLoopFunction(const AACLoopFunction& orig) {}
+Corridor::Corridor(const Corridor& orig) {}
 
 /****************************************/
 /****************************************/
 
-AACLoopFunction::~AACLoopFunction() {}
+Corridor::~Corridor() {}
 
 /****************************************/
 /****************************************/
 
-void AACLoopFunction::Destroy() {}
+void Corridor::Destroy() {}
 
 /****************************************/
 /****************************************/
 
-void AACLoopFunction::Reset() {
-  // std::cout << "RESET\n";
+void Corridor::Reset() {
+  //std::cout << "RESET\n";
   m_fObjectiveFunction = 0;
   fTimeStep = 0;
 
@@ -98,7 +107,7 @@ void AACLoopFunction::Reset() {
 /****************************************/
 /****************************************/
 
-void AACLoopFunction::Init(TConfigurationNode& t_tree) {
+void Corridor::Init(TConfigurationNode& t_tree) {
   //std::cout << "INIT\n";
   CoreLoopFunctions::Init(t_tree);
   TConfigurationNode cParametersNode;
@@ -147,25 +156,72 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
 /****************************************/
 /****************************************/
 
-argos::CColor AACLoopFunction::GetFloorColor(const argos::CVector2& c_position_on_plane) {
+argos::CColor Corridor::GetFloorColor(const argos::CVector2& c_position_on_plane) {
   CVector2 vCurrentPoint(c_position_on_plane.GetX(), c_position_on_plane.GetY());
-  Real d = (m_cCoordBlackSpot - vCurrentPoint).Length();
-  if (d <= m_fRadius) {
+  if (IsOnColor(vCurrentPoint, "black")) {
     return CColor::BLACK;
   }
 
-  // d = (m_cCoordWhiteSpot - vCurrentPoint).Length();
-  // if (d <= m_fRadius) {
-  //   return CColor::WHITE;
-  // }
+  if (IsOnColor(vCurrentPoint, "white")) {
+    return CColor::WHITE;
+  }
 
-  return CColor::GRAY50;
+  else {
+    return CColor::GRAY50;
+  }
 }
 
 /****************************************/
 /****************************************/
 
-void AACLoopFunction::PreStep() {
+bool Corridor::IsOnColor(CVector2& c_position_on_plane, std::string color) {
+  // checking floor circles
+  for (Circle c : lCircles) 
+  {
+    if (c.color == color)
+    {
+      Real d = (c.center - c_position_on_plane).Length();
+      if (d <= c.radius) 
+      {
+        return true;
+      }
+    }
+  }
+
+  // checking floor rectangles
+  for (Rectangle r : lRectangles) 
+  {
+    if (r.color == color)
+    {
+      Real phi = std::atan(r.width/r.height);
+      Real theta = r.angle * (M_PI/180);
+      Real hyp = std::sqrt((r.width*r.width) + (r.height*r.height));
+      // compute position of three corner of the rectangle
+      CVector2 corner1 = CVector2(r.center.GetX() - hyp*std::cos(phi + theta), r.center.GetY() + hyp*std::sin(phi + theta));
+      CVector2 corner2 = CVector2(r.center.GetX() + hyp*std::cos(phi - theta), r.center.GetY() + hyp*std::sin(phi - theta));
+      CVector2 corner3 = CVector2(r.center.GetX() + hyp*std::cos(phi + theta), r.center.GetY() - hyp*std::sin(phi + theta));
+      // computing the three vectors
+      CVector2 corner2ToCorner1 = corner1 - corner2; 
+      CVector2 corner2ToCorner3 = corner3 - corner2; 
+      CVector2 corner2ToPos = c_position_on_plane - corner2; 
+      // compute the four inner products
+      Real ip1 = corner2ToPos.GetX()*corner2ToCorner1.GetX() + corner2ToPos.GetY()*corner2ToCorner1.GetY();
+      Real ip2 = corner2ToCorner1.GetX()*corner2ToCorner1.GetX() + corner2ToCorner1.GetY()*corner2ToCorner1.GetY();
+      Real ip3 = corner2ToPos.GetX()*corner2ToCorner3.GetX() + corner2ToPos.GetY()*corner2ToCorner3.GetY();
+      Real ip4 = corner2ToCorner3.GetX()*corner2ToCorner3.GetX() + corner2ToCorner3.GetY()*corner2ToCorner3.GetY();
+      if (ip1 > 0 && ip1 < ip2 && ip3 > 0 && ip3 < ip4)
+      {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/****************************************/
+/****************************************/
+
+void Corridor::PreStep() {
   //std::cout << "Presetp\n";
   int N = (critic_input_dim - 4)/5; // Number of closest neighbors to consider (4 absolute states + 5 relative states)
   // at::Tensor grid = torch::zeros({50, 50});
@@ -224,11 +280,10 @@ void AACLoopFunction::PreStep() {
 
     // Reward computation
     float reward = 0.0;
-    Real fDistanceSpot = (m_cCoordBlackSpot - cEpuckPosition).Length();
-    if (fDistanceSpot <= m_fRadius) {
+    if (IsOnColor(cEpuckPosition, "black")) {
       reward = 1.0;
     } else {
-      reward = 0; //std::pow(10, -3 * fDistanceSpot / m_fDistributionRadius);
+      reward = 0;//std::pow(10, -3 * fDistanceSpot / m_fDistributionRadius);
     }
     rewards.push_back(torch::tensor(reward));
     m_fObjectiveFunction += reward;
@@ -387,7 +442,7 @@ void AACLoopFunction::PreStep() {
 /****************************************/
 /****************************************/
 
-void AACLoopFunction::PostStep() {
+void Corridor::PostStep() {
   // if(!training){
   //   // place spot in grid
   //   int grid_x = static_cast<int>(std::round((m_cCoordBlackSpot.GetX() + 1.231) / 2.462 * 49));
@@ -417,7 +472,7 @@ void AACLoopFunction::PostStep() {
 /****************************************/
 /****************************************/
 
-void AACLoopFunction::PostExperiment() {
+void Corridor::PostExperiment() {
   LOG << "Time = " << fTimeStep << std::endl;
   LOG << "Score = " << m_fObjectiveFunction << std::endl;
 }
@@ -425,14 +480,14 @@ void AACLoopFunction::PostExperiment() {
 /****************************************/
 /****************************************/
 
-Real AACLoopFunction::GetObjectiveFunction() {
+Real Corridor::GetObjectiveFunction() {
   return m_fObjectiveFunction;
 }
 
 /****************************************/
 /****************************************/
 
-float AACLoopFunction::GetTDError() {
+float Corridor::GetTDError() {
   float sum = std::accumulate(TDerrors.begin(), TDerrors.end(), 0.0f);
   float average = sum / TDerrors.size();
   return average;
@@ -441,7 +496,7 @@ float AACLoopFunction::GetTDError() {
 /****************************************/
 /****************************************/
 
-float AACLoopFunction::GetEntropy() {
+float Corridor::GetEntropy() {
   float sum = std::accumulate(Entropies.begin(), Entropies.end(), 0.0f);
   float average = sum / Entropies.size();
   return average;
@@ -450,7 +505,7 @@ float AACLoopFunction::GetEntropy() {
 /****************************************/
 /****************************************/
 
-float AACLoopFunction::GetActorLoss() {
+float Corridor::GetActorLoss() {
   float sum = std::accumulate(actor_losses.begin(), actor_losses.end(), 0.0f);
   float average = sum / actor_losses.size();
   return average;
@@ -460,7 +515,7 @@ float AACLoopFunction::GetActorLoss() {
 /****************************************/
 /****************************************/
 
-float AACLoopFunction::GetCriticLoss() {
+float Corridor::GetCriticLoss() {
   float sum = std::accumulate(critic_losses.begin(), critic_losses.end(), 0.0f);
   float average = sum / critic_losses.size();
   return average;
@@ -469,7 +524,7 @@ float AACLoopFunction::GetCriticLoss() {
 /****************************************/
 /****************************************/
 
-std::vector<float> AACLoopFunction::GetBehavHist() {
+std::vector<float> Corridor::GetBehavHist() {
   //Calculate the sum of all elements
   float sum = std::accumulate(behav_hist.begin(), behav_hist.end(), 0.0f);
 
@@ -486,7 +541,7 @@ std::vector<float> AACLoopFunction::GetBehavHist() {
 /****************************************/
 /****************************************/
 
-std::vector<RelativePosition> AACLoopFunction::compute_relative_positions(const CVector2& base_position, const CRadians& base_yaw, const std::vector<std::pair<CVector2, CRadians>>& all_positions) {
+std::vector<RelativePosition> Corridor::compute_relative_positions(const CVector2& base_position, const CRadians& base_yaw, const std::vector<std::pair<CVector2, CRadians>>& all_positions) {
   std::vector<RelativePosition> relative_positions;
   for (const auto& pos : all_positions) {
     float dx = pos.first.GetX() - base_position.GetX();
@@ -503,18 +558,13 @@ std::vector<RelativePosition> AACLoopFunction::compute_relative_positions(const 
 /****************************************/
 /****************************************/
 
-CVector3 AACLoopFunction::GetRandomPosition() {
+CVector3 Corridor::GetRandomPosition() {
   Real temp;
   Real a = m_pcRng->Uniform(CRange<Real>(0.0f, 1.0f));
-  Real  b = m_pcRng->Uniform(CRange<Real>(0.0f, 1.0f));
-  // If b < a, swap them
-  if (b < a) {
-    temp = a;
-    a = b;
-    b = temp;
-  }
-  Real fPosX = b * m_fDistributionRadius * cos(2 * CRadians::PI.GetValue() * (a/b));
-  Real fPosY = b * m_fDistributionRadius * sin(2 * CRadians::PI.GetValue() * (a/b));
+  Real b = m_pcRng->Uniform(CRange<Real>(0.0f, 1.0f));
+
+  Real fPosX = (a * 2*0.5) - 0.5;
+  Real fPosY = (b * 2*1.5) - 1.5;
 
   return CVector3(fPosX, fPosY, 0);
 }
@@ -523,7 +573,7 @@ CVector3 AACLoopFunction::GetRandomPosition() {
 /****************************************/
 
 // Function to compute the log-PDF of the Beta distribution
-double AACLoopFunction::computeBetaLogPDF(double alpha, double beta, double x) {
+double Corridor::computeBetaLogPDF(double alpha, double beta, double x) {
     // Compute the logarithm of the Beta function
     double logBeta = std::lgamma(alpha) + std::lgamma(beta) - std::lgamma(alpha + beta);
 
@@ -536,7 +586,7 @@ double AACLoopFunction::computeBetaLogPDF(double alpha, double beta, double x) {
 /****************************************/
 /****************************************/
 
-void AACLoopFunction::print_grid(at::Tensor grid, int step) {
+void Corridor::print_grid(at::Tensor grid, int step) {
     std::stringstream buffer;
     buffer << "\033[2J\033[1;1H"; // Clear screen and move cursor to top-left
     buffer << "GRID State:\n";
@@ -601,8 +651,8 @@ void AACLoopFunction::print_grid(at::Tensor grid, int step) {
     usleep(100000); // Sleep for 0.1 seconds (100,000 microseconds)
 }
 
-void AACLoopFunction::SetTraining(bool value) {
+void Corridor::SetTraining(bool value) {
     training = value;
 }
 
-REGISTER_LOOP_FUNCTIONS(AACLoopFunction, "aac_loop_functions");
+REGISTER_LOOP_FUNCTIONS(Corridor, "corridor");
