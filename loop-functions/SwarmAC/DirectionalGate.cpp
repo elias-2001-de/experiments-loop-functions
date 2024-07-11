@@ -8,35 +8,36 @@
   * @license MIT License
   */
 
-#include "SCALoopFunc.h"
+#include "DirectionalGate.h"
 
 /****************************************/
 /****************************************/
 
-SCALoopFunction::SCALoopFunction() {
+DirectionalGate::DirectionalGate() {
   m_fObjectiveFunction = 0;
-  fTimeStep = 0;
+  m_fGateZone = 0;
+  m_fWidthShelter = 0.5;
 }
 
 /****************************************/
 /****************************************/
 
-SCALoopFunction::SCALoopFunction(const SCALoopFunction& orig) {}
+DirectionalGate::DirectionalGate(const DirectionalGate& orig) {}
 
 /****************************************/
 /****************************************/
 
-SCALoopFunction::~SCALoopFunction() {}
+DirectionalGate::~DirectionalGate() {}
 
 /****************************************/
 
 /****************************************/
-void SCALoopFunction::Destroy() {}
+void DirectionalGate::Destroy() {}
 
 /****************************************/
 /****************************************/
 
-void SCALoopFunction::Reset() {
+void DirectionalGate::Reset() {
   m_fObjectiveFunction = 0;
   fTimeStep = 0;
 
@@ -92,7 +93,7 @@ void SCALoopFunction::Reset() {
 /****************************************/
 /****************************************/
 
-void SCALoopFunction::Init(TConfigurationNode& t_tree) {
+void DirectionalGate::Init(TConfigurationNode& t_tree) {
   // Parsing all floor circles
   TConfigurationNodeIterator it_circle("circle");
   TConfigurationNode circleParameters;
@@ -178,7 +179,7 @@ TConfigurationNode cParametersNode;
 /****************************************/
 /****************************************/
 
-argos::CColor SCALoopFunction::GetFloorColor(const argos::CVector2& c_position_on_plane) {
+argos::CColor DirectionalGate::GetFloorColor(const argos::CVector2& c_position_on_plane) {
   CVector2 vCurrentPoint(c_position_on_plane.GetX(), c_position_on_plane.GetY());
   if (IsOnColor(vCurrentPoint, "black")) {
     return CColor::BLACK;
@@ -196,7 +197,7 @@ argos::CColor SCALoopFunction::GetFloorColor(const argos::CVector2& c_position_o
 /****************************************/
 /****************************************/
 
-bool SCALoopFunction::IsOnColor(CVector2& c_position_on_plane, std::string color) {
+bool DirectionalGate::IsOnColor(CVector2& c_position_on_plane, std::string color) {
   // checking floor circles
   for (Circle c : lCircles) 
   {
@@ -215,9 +216,11 @@ bool SCALoopFunction::IsOnColor(CVector2& c_position_on_plane, std::string color
   {
     if (r.color == color)
     {
-      Real phi = std::atan(r.height/r.width);
+      Real h = r.height / 2;
+      Real w = r.width / 2;
+      Real phi = std::atan(h/w);
       Real theta = r.angle * (M_PI/180);
-      Real hyp = std::sqrt((r.width*r.width) + (r.height*r.height));
+      Real hyp = std::sqrt((w*w) + (h*h));
       // compute position of three corner of the rectangle
       CVector2 corner1 = CVector2(r.center.GetX() - hyp*std::cos(phi + theta), r.center.GetY() + hyp*std::sin(phi + theta));
       CVector2 corner2 = CVector2(r.center.GetX() + hyp*std::cos(phi - theta), r.center.GetY() + hyp*std::sin(phi - theta));
@@ -243,7 +246,7 @@ bool SCALoopFunction::IsOnColor(CVector2& c_position_on_plane, std::string color
 /****************************************/
 /****************************************/
 
-void SCALoopFunction::PreStep() {
+void DirectionalGate::PreStep() {
   int N = (critic_input_dim - 4)/5; // Number of closest neighbors to consider (4 absolute states + 5 relative states)
   std::vector<torch::Tensor> positions;
   CSpace::TMapPerType& tEpuckMap = GetSpace().GetEntitiesByType("epuck");
@@ -300,13 +303,17 @@ void SCALoopFunction::PreStep() {
 
     // Reward computation
     float reward = 0.0;
-    if (IsOnColor(cEpuckPosition, "white")) {
-      reward = 1.0;
-    } else {
-      reward = 0;//std::pow(10, -3 * fDistanceSpot / m_fDistributionRadius);
+    if (cEpuckPosition.GetX() < m_fWidthShelter/2 && cEpuckPosition.GetX() > -m_fWidthShelter/2) {
+        if (m_tOldPosPoints[pcEpuck].GetY() < m_fGateZone && cEpuckPosition.GetY() > m_fGateZone) {
+            reward-=1;
+        }
+        else if (m_tOldPosPoints[pcEpuck].GetY() > m_fGateZone && cEpuckPosition.GetY() < m_fGateZone) {
+            reward+=1;
+        }
     }
     rewards.push_back(torch::tensor(reward));
     m_fObjectiveFunction += reward;
+    m_tOldPosPoints[pcEpuck] = cEpuckPosition;
   }
   
   if (fTimeStep == 0)
@@ -454,12 +461,12 @@ void SCALoopFunction::PreStep() {
 /****************************************/
 /****************************************/
 
-void SCALoopFunction::PostStep() {}
+void DirectionalGate::PostStep() {}
 
 /****************************************/
 /****************************************/
 
-void SCALoopFunction::PostExperiment() {
+void DirectionalGate::PostExperiment() {
   LOG << "Time = " << fTimeStep << std::endl;
   LOG << "Score = " << m_fObjectiveFunction << std::endl;
 }
@@ -467,14 +474,14 @@ void SCALoopFunction::PostExperiment() {
 /****************************************/
 /****************************************/
 
-Real SCALoopFunction::GetObjectiveFunction() {
+Real DirectionalGate::GetObjectiveFunction() {
   return m_fObjectiveFunction;
 }
 
 /****************************************/
 /****************************************/
 
-float SCALoopFunction::GetTDError() {
+float DirectionalGate::GetTDError() {
   float sum = std::accumulate(TDerrors.begin(), TDerrors.end(), 0.0f);
   float average = sum / TDerrors.size();
   return average;
@@ -483,7 +490,7 @@ float SCALoopFunction::GetTDError() {
 /****************************************/
 /****************************************/
 
-float SCALoopFunction::GetEntropy() {
+float DirectionalGate::GetEntropy() {
   float sum = std::accumulate(Entropies.begin(), Entropies.end(), 0.0f);
   float average = sum / Entropies.size();
   return average;
@@ -492,7 +499,7 @@ float SCALoopFunction::GetEntropy() {
 /****************************************/
 /****************************************/
 
-float SCALoopFunction::GetActorLoss() {
+float DirectionalGate::GetActorLoss() {
   float sum = std::accumulate(actor_losses.begin(), actor_losses.end(), 0.0f);
   float average = sum / actor_losses.size();
   return average;
@@ -502,7 +509,7 @@ float SCALoopFunction::GetActorLoss() {
 /****************************************/
 /****************************************/
 
-float SCALoopFunction::GetCriticLoss() {
+float DirectionalGate::GetCriticLoss() {
   float sum = std::accumulate(critic_losses.begin(), critic_losses.end(), 0.0f);
   float average = sum / critic_losses.size();
   return average;
@@ -511,7 +518,7 @@ float SCALoopFunction::GetCriticLoss() {
 /****************************************/
 /****************************************/
 
-std::vector<float> SCALoopFunction::GetBehavHist() {
+std::vector<float> DirectionalGate::GetBehavHist() {
   //Calculate the sum of all elements
   float sum = std::accumulate(behav_hist.begin(), behav_hist.end(), 0.0f);
 
@@ -528,7 +535,7 @@ std::vector<float> SCALoopFunction::GetBehavHist() {
 /****************************************/
 /****************************************/
 
-std::vector<RelativePosition> SCALoopFunction::compute_relative_positions(const CVector2& base_position, const CRadians& base_yaw, const std::vector<std::pair<CVector2, CRadians>>& all_positions) {
+std::vector<RelativePosition> DirectionalGate::compute_relative_positions(const CVector2& base_position, const CRadians& base_yaw, const std::vector<std::pair<CVector2, CRadians>>& all_positions) {
   std::vector<RelativePosition> relative_positions;
   for (const auto& pos : all_positions) {
     float dx = pos.first.GetX() - base_position.GetX();
@@ -545,7 +552,7 @@ std::vector<RelativePosition> SCALoopFunction::compute_relative_positions(const 
 /****************************************/
 /****************************************/
 
-CVector3 SCALoopFunction::GetRandomPosition() {
+CVector3 DirectionalGate::GetRandomPosition() {
   Real temp;
   Real a = m_pcRng->Uniform(CRange<Real>(0.0f, 1.0f));
   Real  b = m_pcRng->Uniform(CRange<Real>(0.0f, 1.0f));
@@ -564,8 +571,8 @@ CVector3 SCALoopFunction::GetRandomPosition() {
 /****************************************/
 /****************************************/
 
-void SCALoopFunction::SetTraining(bool value) {
+void DirectionalGate::SetTraining(bool value) {
     training = value;
 }
 
-REGISTER_LOOP_FUNCTIONS(SCALoopFunction, "sca_loop_functions");
+REGISTER_LOOP_FUNCTIONS(DirectionalGate, "directional_gate");

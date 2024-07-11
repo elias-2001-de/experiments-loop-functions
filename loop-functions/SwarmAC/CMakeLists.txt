@@ -7,6 +7,8 @@ add_library(swarmac_loopfunc SHARED
                           SCALoopFunc.cpp
                           Corridor.h
                           Corridor.cpp
+                          DirectionalGate.h
+                          DirectionalGate.cpp
                           ${LOOP_HEADERS}
                           ${LOOP_SOURCES})
 
