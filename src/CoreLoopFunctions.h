@@ -157,35 +157,6 @@ class CoreLoopFunctions: public CLoopFunctions {
     virtual void SetValuePointer(Critic_Net* value);
 
     virtual void SetTraining(bool value);
-
-    // Define your data structure
-    struct Data {
-      std::vector<float> param;
-    };
-
-    // Define your serialization function
-    // std::string serialize(const Data& data) {
-    //     std::stringstream ss;
-    //     ss << data.delta;
-    //     ss << "\n";
-    //     std::copy(data.update.begin(), data.update.end(), std::ostream_iterator<float>(ss, " "));
-    //     return ss.str();
-    // }
-    std::string serialize(const Data& data) {
-        // Calculate the size of the serialized data
-        size_t size = sizeof(float) * data.param.size();
-
-        // Create a string to hold the serialized data
-        std::string serialized_data;
-        serialized_data.resize(size);
-
-        // Copy the vector's contents into the string
-        if (!data.param.empty()) {
-            std::memcpy(&serialized_data[0], &data.param[0], size);
-        }
-
-        return serialized_data;
-    }
 };
 
 #endif

@@ -95,6 +95,7 @@ void AACLoopFunction::Reset() {
 /****************************************/
 
 void AACLoopFunction::Init(TConfigurationNode& t_tree) {
+  // std::cout << "INIT\n";
   CoreLoopFunctions::Init(t_tree);
   TConfigurationNode cParametersNode;
   cParametersNode = GetNode(t_tree, "params");
@@ -136,6 +137,7 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
   experimentNode = GetNode(frameworkNode, "experiment");
   GetNodeAttribute(experimentNode, "length", mission_length);
   mission_length *= 10;
+  // std::cout << "END INIT\n";
 }
 
 /****************************************/
@@ -160,6 +162,7 @@ argos::CColor AACLoopFunction::GetFloorColor(const argos::CVector2& c_position_o
 /****************************************/
 
 void AACLoopFunction::PreStep() {
+  // std::cout << "PRESET\n";
   int N = (critic_input_dim - 4)/5; // Number of closest neighbors to consider (4 absolute states + 5 relative states)
   std::vector<torch::Tensor> positions;
   CSpace::TMapPerType& tEpuckMap = GetSpace().GetEntitiesByType("epuck");
@@ -233,7 +236,7 @@ void AACLoopFunction::PreStep() {
     {
       states.push_back(state.clone());
     }
-    
+
     // Launch the experiment with the correct random seed and network,
     // and evaluate the average fitness
     CSpace::TMapPerType cEntities = GetSpace().GetEntitiesByType("controller");
@@ -243,7 +246,7 @@ void AACLoopFunction::PreStep() {
       CControllableEntity *pcEntity = any_cast<CControllableEntity *>(it->second);
       try {
         CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
-        cController.SetNetworkAndOptimizer(actor_net, optimizer_actor, device_type);
+        cController.SetNetworkAndOptimizer(actor_net);
         i++;
       } catch (std::exception &ex) {
         LOGERR << "Error while setting network: " << ex.what() << std::endl;
@@ -299,7 +302,7 @@ void AACLoopFunction::PreStep() {
         optimizer_critic->step();
 
         // Prepare for policy update
-        std::vector<torch::Tensor> log_probs;
+        std::vector<torch::Tensor>  ;
         std::vector<torch::Tensor> entropies;
         CSpace::TMapPerType cEntities = GetSpace().GetEntitiesByType("controller"); 
         for (CSpace::TMapPerType::iterator it = cEntities.begin();
@@ -358,7 +361,7 @@ void AACLoopFunction::PreStep() {
       CControllableEntity *pcEntity = any_cast<CControllableEntity *>(it->second);
       try {
         CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
-        cController.SetNetworkAndOptimizer(actor_net, optimizer_actor, device_type);
+        cController.SetNetworkAndOptimizer(actor_net);
         i++;
       } catch (std::exception &ex) {
         LOGERR << "Error while setting network: " << ex.what() << std::endl;
@@ -368,6 +371,7 @@ void AACLoopFunction::PreStep() {
     fTimeStep += 1;
   }
 }
+
 
 /****************************************/
 /****************************************/

@@ -304,7 +304,7 @@ void Corridor::PreStep() {
       CControllableEntity *pcEntity = any_cast<CControllableEntity *>(it->second);
       try {
         CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
-        cController.SetNetworkAndOptimizer(actor_net, optimizer_actor, device_type);
+        cController.SetNetworkAndOptimizer(actor_net);
         i++;
       } catch (std::exception &ex) {
         LOGERR << "Error while setting network: " << ex.what() << std::endl;
@@ -418,7 +418,7 @@ void Corridor::PreStep() {
       CControllableEntity *pcEntity = any_cast<CControllableEntity *>(it->second);
       try {
         CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
-        cController.SetNetworkAndOptimizer(actor_net, optimizer_actor, device_type);
+        cController.SetNetworkAndOptimizer(actor_net);
         i++;
       } catch (std::exception &ex) {
         LOGERR << "Error while setting network: " << ex.what() << std::endl;
