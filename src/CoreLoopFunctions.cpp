@@ -78,7 +78,7 @@ void CoreLoopFunctions::RemoveRobots() {
   }
 }
 
-void CoreLoopFunctions::SetPolicyPointer(argos::CEpuckNNController::Daisy* policy) {
+void CoreLoopFunctions::SetPolicyPointer(argos::CEpuckNNController::ActorBase* policy) {
     actor_net = policy;
 }
 

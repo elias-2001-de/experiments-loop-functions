@@ -246,7 +246,11 @@ void AACLoopFunction::PreStep() {
       CControllableEntity *pcEntity = any_cast<CControllableEntity *>(it->second);
       try {
         CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
-        cController.SetNetworkAndOptimizer(actor_net);
+        if (actor_type == "dandel") {
+          cController.SetNetworkAndOptimizer(dynamic_cast<argos::CEpuckNNController::Dandel*>(actor_net));
+        }else{
+          cController.SetNetworkAndOptimizer(dynamic_cast<argos::CEpuckNNController::Daisy*>(actor_net));
+        }
         i++;
       } catch (std::exception &ex) {
         LOGERR << "Error while setting network: " << ex.what() << std::endl;
@@ -361,7 +365,11 @@ void AACLoopFunction::PreStep() {
       CControllableEntity *pcEntity = any_cast<CControllableEntity *>(it->second);
       try {
         CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
-        cController.SetNetworkAndOptimizer(actor_net);
+        if (actor_type == "dandel") {
+          cController.SetNetworkAndOptimizer(dynamic_cast<argos::CEpuckNNController::Dandel*>(actor_net));
+        }else{
+          cController.SetNetworkAndOptimizer(dynamic_cast<argos::CEpuckNNController::Daisy*>(actor_net));
+        }
         i++;
       } catch (std::exception &ex) {
         LOGERR << "Error while setting network: " << ex.what() << std::endl;
