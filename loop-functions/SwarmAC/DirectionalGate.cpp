@@ -311,8 +311,8 @@ void DirectionalGate::PreStep() {
             reward+=1;
         }
     }
-    rewards.push_back(torch::tensor(reward));
     m_fObjectiveFunction += reward;
+    rewards.push_back(torch::tensor(reward*100));
     m_tOldPosPoints[pcEpuck] = cEpuckPosition;
   }
   

@@ -302,7 +302,7 @@ void AACLoopFunction::PreStep() {
         optimizer_critic->step();
 
         // Prepare for policy update
-        std::vector<torch::Tensor>  ;
+        std::vector<torch::Tensor> log_probs;
         std::vector<torch::Tensor> entropies;
         CSpace::TMapPerType cEntities = GetSpace().GetEntitiesByType("controller"); 
         for (CSpace::TMapPerType::iterator it = cEntities.begin();
