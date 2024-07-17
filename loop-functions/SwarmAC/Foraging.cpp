@@ -8,12 +8,12 @@
   * @license MIT License
   */
 
-#include "SCALoopFunc.h"
+#include "Foraging.h"
 
 /****************************************/
 /****************************************/
 
-SCALoopFunction::SCALoopFunction() {
+Foraging::Foraging() {
   m_fObjectiveFunction = 0;
   fTimeStep = 0;
 }
@@ -21,24 +21,25 @@ SCALoopFunction::SCALoopFunction() {
 /****************************************/
 /****************************************/
 
-SCALoopFunction::SCALoopFunction(const SCALoopFunction& orig) {}
+Foraging::Foraging(const Foraging& orig) {}
 
 /****************************************/
 /****************************************/
 
-SCALoopFunction::~SCALoopFunction() {}
+Foraging::~Foraging() {}
 
 /****************************************/
 
 /****************************************/
-void SCALoopFunction::Destroy() {}
+void Foraging::Destroy() {}
 
 /****************************************/
 /****************************************/
 
-void SCALoopFunction::Reset() {
+void Foraging::Reset() {
   m_fObjectiveFunction = 0;
   fTimeStep = 0;
+  m_mapFoodData.clear();
 
   // Clear existing eligibility traces and initialize them on the device
   eligibility_trace_critic.clear();
@@ -92,7 +93,7 @@ void SCALoopFunction::Reset() {
 /****************************************/
 /****************************************/
 
-void SCALoopFunction::Init(TConfigurationNode& t_tree) {
+void Foraging::Init(TConfigurationNode& t_tree) {
   // Parsing all floor circles
   TConfigurationNodeIterator it_circle("circle");
   TConfigurationNode circleParameters;
@@ -178,7 +179,7 @@ TConfigurationNode cParametersNode;
 /****************************************/
 /****************************************/
 
-argos::CColor SCALoopFunction::GetFloorColor(const argos::CVector2& c_position_on_plane) {
+argos::CColor Foraging::GetFloorColor(const argos::CVector2& c_position_on_plane) {
   CVector2 vCurrentPoint(c_position_on_plane.GetX(), c_position_on_plane.GetY());
   if (IsOnColor(vCurrentPoint, "black")) {
     return CColor::BLACK;
@@ -196,7 +197,7 @@ argos::CColor SCALoopFunction::GetFloorColor(const argos::CVector2& c_position_o
 /****************************************/
 /****************************************/
 
-bool SCALoopFunction::IsOnColor(CVector2& c_position_on_plane, std::string color) {
+bool Foraging::IsOnColor(CVector2& c_position_on_plane, std::string color) {
   // checking floor circles
   for (Circle c : lCircles) 
   {
@@ -243,7 +244,7 @@ bool SCALoopFunction::IsOnColor(CVector2& c_position_on_plane, std::string color
 /****************************************/
 /****************************************/
 
-void SCALoopFunction::PreStep() {
+void Foraging::PreStep() {
   int N = (critic_input_dim - 4)/5; // Number of closest neighbors to consider (4 absolute states + 5 relative states)
   std::vector<torch::Tensor> positions;
   CSpace::TMapPerType& tEpuckMap = GetSpace().GetEntitiesByType("epuck");
@@ -253,6 +254,7 @@ void SCALoopFunction::PreStep() {
 
   for (CSpace::TMapPerType::iterator it = tEpuckMap.begin(); it != tEpuckMap.end(); ++it) {
     CEPuckEntity* pcEpuck = any_cast<CEPuckEntity*>(it->second);
+    std::string strRobotId = pcEpuck->GetId();
     cEpuckPosition.Set(pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetX(),
                        pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetY());
                        
@@ -300,10 +302,24 @@ void SCALoopFunction::PreStep() {
 
     // Reward computation
     float reward = 0.0;
-    if (IsOnColor(cEpuckPosition, "white")) {
-      reward = 1.0;
-    } else {
-      reward = 0;//std::pow(10, -3 * fDistanceSpot / m_fDistributionRadius);
+    // if (IsOnColor(cEpuckPosition, "white")) {
+    //   reward = 1.0;
+    // } else {
+    //   reward = 0;//std::pow(10, -3 * fDistanceSpot / m_fDistributionRadius);
+    // }
+    // rewards.push_back(torch::tensor(reward));
+    // m_fObjectiveFunction += reward;
+
+
+    if (IsOnColor(cEpuckPosition, "black")) {
+      m_mapFoodData[strRobotId] = 1;
+    } else if (IsOnColor(cEpuckPosition, "white")) {
+      std::map<std::string, UInt32>::iterator itFood = m_mapFoodData.find(strRobotId);
+      if (itFood != m_mapFoodData.end()) {
+        reward += itFood->second;
+      }
+      m_mapFoodData[strRobotId] = 0;
+      LOG << "Obj " << reward << std::endl;
     }
     rewards.push_back(torch::tensor(reward));
     m_fObjectiveFunction += reward;
@@ -462,12 +478,12 @@ void SCALoopFunction::PreStep() {
 /****************************************/
 /****************************************/
 
-void SCALoopFunction::PostStep() {}
+void Foraging::PostStep() {}
 
 /****************************************/
 /****************************************/
 
-void SCALoopFunction::PostExperiment() {
+void Foraging::PostExperiment() {
   LOG << "Time = " << fTimeStep << std::endl;
   LOG << "Score = " << m_fObjectiveFunction << std::endl;
 }
@@ -475,14 +491,14 @@ void SCALoopFunction::PostExperiment() {
 /****************************************/
 /****************************************/
 
-Real SCALoopFunction::GetObjectiveFunction() {
+Real Foraging::GetObjectiveFunction() {
   return m_fObjectiveFunction;
 }
 
 /****************************************/
 /****************************************/
 
-float SCALoopFunction::GetTDError() {
+float Foraging::GetTDError() {
   float sum = std::accumulate(TDerrors.begin(), TDerrors.end(), 0.0f);
   float average = sum / TDerrors.size();
   return average;
@@ -491,7 +507,7 @@ float SCALoopFunction::GetTDError() {
 /****************************************/
 /****************************************/
 
-float SCALoopFunction::GetEntropy() {
+float Foraging::GetEntropy() {
   float sum = std::accumulate(Entropies.begin(), Entropies.end(), 0.0f);
   float average = sum / Entropies.size();
   return average;
@@ -500,7 +516,7 @@ float SCALoopFunction::GetEntropy() {
 /****************************************/
 /****************************************/
 
-float SCALoopFunction::GetActorLoss() {
+float Foraging::GetActorLoss() {
   float sum = std::accumulate(actor_losses.begin(), actor_losses.end(), 0.0f);
   float average = sum / actor_losses.size();
   return average;
@@ -510,7 +526,7 @@ float SCALoopFunction::GetActorLoss() {
 /****************************************/
 /****************************************/
 
-float SCALoopFunction::GetCriticLoss() {
+float Foraging::GetCriticLoss() {
   float sum = std::accumulate(critic_losses.begin(), critic_losses.end(), 0.0f);
   float average = sum / critic_losses.size();
   return average;
@@ -519,7 +535,7 @@ float SCALoopFunction::GetCriticLoss() {
 /****************************************/
 /****************************************/
 
-std::vector<float> SCALoopFunction::GetBehavHist() {
+std::vector<float> Foraging::GetBehavHist() {
   //Calculate the sum of all elements
   float sum = std::accumulate(behav_hist.begin(), behav_hist.end(), 0.0f);
 
@@ -536,7 +552,7 @@ std::vector<float> SCALoopFunction::GetBehavHist() {
 /****************************************/
 /****************************************/
 
-std::vector<RelativePosition> SCALoopFunction::compute_relative_positions(const CVector2& base_position, const CRadians& base_yaw, const std::vector<std::pair<CVector2, CRadians>>& all_positions) {
+std::vector<RelativePosition> Foraging::compute_relative_positions(const CVector2& base_position, const CRadians& base_yaw, const std::vector<std::pair<CVector2, CRadians>>& all_positions) {
   std::vector<RelativePosition> relative_positions;
   for (const auto& pos : all_positions) {
     float dx = pos.first.GetX() - base_position.GetX();
@@ -553,7 +569,7 @@ std::vector<RelativePosition> SCALoopFunction::compute_relative_positions(const 
 /****************************************/
 /****************************************/
 
-CVector3 SCALoopFunction::GetRandomPosition() {
+CVector3 Foraging::GetRandomPosition() {
   Real temp;
   Real a = m_pcRng->Uniform(CRange<Real>(0.0f, 1.0f));
   Real  b = m_pcRng->Uniform(CRange<Real>(0.0f, 1.0f));
@@ -572,8 +588,8 @@ CVector3 SCALoopFunction::GetRandomPosition() {
 /****************************************/
 /****************************************/
 
-void SCALoopFunction::SetTraining(bool value) {
+void Foraging::SetTraining(bool value) {
     training = value;
 }
 
-REGISTER_LOOP_FUNCTIONS(SCALoopFunction, "sca_loop_functions");
+REGISTER_LOOP_FUNCTIONS(Foraging, "foraging");

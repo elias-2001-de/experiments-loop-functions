@@ -198,7 +198,6 @@ void AACLoopFunction::PreStep() {
     std::nth_element(relatives.begin(), relatives.begin() + N, relatives.end(), [](const RelativePosition& a, const RelativePosition& b) {
       return a.distance < b.distance;
     });
-    relatives.resize(N);  // Keep only the N closest
 
     // Create state tensor for the current e-puck
     torch::Tensor pos = torch::empty({critic_input_dim});
@@ -207,7 +206,10 @@ void AACLoopFunction::PreStep() {
     pos[2] = std::cos(cYaw.GetValue());
     pos[3] = std::sin(cYaw.GetValue());
     int index = 4;
-    for (const auto& rel : relatives) {
+
+    // Iterate only over the first N elements of relatives
+    for (int i = 0; i < N; ++i) {
+      const auto& rel = relatives[i];
       pos[index++] = rel.distance;
       pos[index++] = std::cos(rel.angle);
       pos[index++] = std::sin(rel.angle);
@@ -247,9 +249,9 @@ void AACLoopFunction::PreStep() {
       try {
         CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
         if (actor_type == "dandel") {
-          cController.SetNetworkAndOptimizer(dynamic_cast<argos::CEpuckNNController::Dandel*>(actor_net));
+          cController.SetNetworkAndOptimizer(dynamic_cast<argos::CEpuckNNController::Dandel*>(actor_net), device_type);
         }else{
-          cController.SetNetworkAndOptimizer(dynamic_cast<argos::CEpuckNNController::Daisy*>(actor_net));
+          cController.SetNetworkAndOptimizer(dynamic_cast<argos::CEpuckNNController::Daisy*>(actor_net), device_type);
         }
         i++;
       } catch (std::exception &ex) {
@@ -366,9 +368,9 @@ void AACLoopFunction::PreStep() {
       try {
         CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
         if (actor_type == "dandel") {
-          cController.SetNetworkAndOptimizer(dynamic_cast<argos::CEpuckNNController::Dandel*>(actor_net));
+          cController.SetNetworkAndOptimizer(dynamic_cast<argos::CEpuckNNController::Dandel*>(actor_net), device_type);
         }else{
-          cController.SetNetworkAndOptimizer(dynamic_cast<argos::CEpuckNNController::Daisy*>(actor_net));
+          cController.SetNetworkAndOptimizer(dynamic_cast<argos::CEpuckNNController::Daisy*>(actor_net), device_type);
         }
         i++;
       } catch (std::exception &ex) {

@@ -9,6 +9,8 @@ add_library(swarmac_loopfunc SHARED
                           Corridor.cpp
                           DirectionalGate.h
                           DirectionalGate.cpp
+                          Foraging.h
+                          Foraging.cpp
                           ${LOOP_HEADERS}
                           ${LOOP_SOURCES})
 

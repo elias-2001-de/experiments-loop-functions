@@ -305,9 +305,9 @@ void Corridor::PreStep() {
       try {
         CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
         if (actor_type == "dandel") {
-          cController.SetNetworkAndOptimizer(dynamic_cast<argos::CEpuckNNController::Dandel*>(actor_net));
+          cController.SetNetworkAndOptimizer(dynamic_cast<argos::CEpuckNNController::Dandel*>(actor_net), device_type);
         }else{
-          cController.SetNetworkAndOptimizer(dynamic_cast<argos::CEpuckNNController::Daisy*>(actor_net));
+          cController.SetNetworkAndOptimizer(dynamic_cast<argos::CEpuckNNController::Daisy*>(actor_net), device_type);
         }
         i++;
       } catch (std::exception &ex) {
@@ -423,9 +423,9 @@ void Corridor::PreStep() {
       try {
         CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
         if (actor_type == "dandel") {
-          cController.SetNetworkAndOptimizer(dynamic_cast<argos::CEpuckNNController::Dandel*>(actor_net));
+          cController.SetNetworkAndOptimizer(dynamic_cast<argos::CEpuckNNController::Dandel*>(actor_net), device_type);
         }else{
-          cController.SetNetworkAndOptimizer(dynamic_cast<argos::CEpuckNNController::Daisy*>(actor_net));
+          cController.SetNetworkAndOptimizer(dynamic_cast<argos::CEpuckNNController::Daisy*>(actor_net), device_type);
         }
         i++;
       } catch (std::exception &ex) {
