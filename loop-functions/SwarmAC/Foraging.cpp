@@ -309,8 +309,6 @@ void Foraging::PreStep() {
     // }
     // rewards.push_back(torch::tensor(reward));
     // m_fObjectiveFunction += reward;
-
-
     if (IsOnColor(cEpuckPosition, "black")) {
       m_mapFoodData[strRobotId] = 1;
     } else if (IsOnColor(cEpuckPosition, "white")) {
@@ -319,7 +317,6 @@ void Foraging::PreStep() {
         reward += itFood->second;
       }
       m_mapFoodData[strRobotId] = 0;
-      LOG << "Obj " << reward << std::endl;
     }
     rewards.push_back(torch::tensor(reward));
     m_fObjectiveFunction += reward;
