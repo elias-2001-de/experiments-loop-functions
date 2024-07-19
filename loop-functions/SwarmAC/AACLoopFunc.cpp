@@ -243,19 +243,31 @@ void AACLoopFunction::PreStep() {
     // and evaluate the average fitness
     CSpace::TMapPerType cEntities = GetSpace().GetEntitiesByType("controller");
     int i = 0;
-    for (CSpace::TMapPerType::iterator it = cEntities.begin();
-        it != cEntities.end(); ++it) {
-      CControllableEntity *pcEntity = any_cast<CControllableEntity *>(it->second);
-      try {
-        CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
-        if (actor_type == "dandel") {
+    if (actor_type == "dandel") {
+      /// ACTOR DECISION
+      for (CSpace::TMapPerType::iterator it = cEntities.begin();
+          it != cEntities.end(); ++it) {
+        CControllableEntity *pcEntity = any_cast<CControllableEntity *>(it->second);
+        try {
+          CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
           cController.SetNetworkAndOptimizer(dynamic_cast<argos::CEpuckNNController::Dandel*>(actor_net), device_type);
-        }else{
-          cController.SetNetworkAndOptimizer(dynamic_cast<argos::CEpuckNNController::Daisy*>(actor_net), device_type);
+          i++;
+        } catch (std::exception &ex) {
+          LOGERR << "Error while setting network: " << ex.what() << std::endl;
         }
-        i++;
-      } catch (std::exception &ex) {
-        LOGERR << "Error while setting network: " << ex.what() << std::endl;
+      }
+    }else{
+      /// ACTOR DECISION
+      for (CSpace::TMapPerType::iterator it = cEntities.begin();
+          it != cEntities.end(); ++it) {
+        CControllableEntity *pcEntity = any_cast<CControllableEntity *>(it->second);
+        try {
+          CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
+          cController.SetNetworkAndOptimizer(dynamic_cast<argos::CEpuckNNController::Daisy*>(actor_net), device_type);
+          i++;
+        } catch (std::exception &ex) {
+          LOGERR << "Error while setting network: " << ex.what() << std::endl;
+        }
       }
     }
 
@@ -362,19 +374,31 @@ void AACLoopFunction::PreStep() {
     // and evaluate the average fitness
     CSpace::TMapPerType cEntities = GetSpace().GetEntitiesByType("controller");
     int i = 0;
-    for (CSpace::TMapPerType::iterator it = cEntities.begin();
-        it != cEntities.end(); ++it) {
-      CControllableEntity *pcEntity = any_cast<CControllableEntity *>(it->second);
-      try {
-        CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
-        if (actor_type == "dandel") {
+    if (actor_type == "dandel") {
+      /// ACTOR DECISION
+      for (CSpace::TMapPerType::iterator it = cEntities.begin();
+          it != cEntities.end(); ++it) {
+        CControllableEntity *pcEntity = any_cast<CControllableEntity *>(it->second);
+        try {
+          CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
           cController.SetNetworkAndOptimizer(dynamic_cast<argos::CEpuckNNController::Dandel*>(actor_net), device_type);
-        }else{
-          cController.SetNetworkAndOptimizer(dynamic_cast<argos::CEpuckNNController::Daisy*>(actor_net), device_type);
+          i++;
+        } catch (std::exception &ex) {
+          LOGERR << "Error while setting network: " << ex.what() << std::endl;
         }
-        i++;
-      } catch (std::exception &ex) {
-        LOGERR << "Error while setting network: " << ex.what() << std::endl;
+      }
+    }else{
+      /// ACTOR DECISION
+      for (CSpace::TMapPerType::iterator it = cEntities.begin();
+          it != cEntities.end(); ++it) {
+        CControllableEntity *pcEntity = any_cast<CControllableEntity *>(it->second);
+        try {
+          CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
+          cController.SetNetworkAndOptimizer(dynamic_cast<argos::CEpuckNNController::Daisy*>(actor_net), device_type);
+          i++;
+        } catch (std::exception &ex) {
+          LOGERR << "Error while setting network: " << ex.what() << std::endl;
+        }
       }
     }
 

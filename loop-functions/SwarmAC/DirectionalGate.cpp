@@ -305,14 +305,21 @@ void DirectionalGate::PreStep() {
     float reward = 0.0;
     if (cEpuckPosition.GetX() < m_fWidthShelter/2 && cEpuckPosition.GetX() > -m_fWidthShelter/2) {
         if (m_tOldPosPoints[pcEpuck].GetY() < m_fGateZone && cEpuckPosition.GetY() > m_fGateZone) {
-            reward-=1;
+            //m_fObjectiveFunction-=1;
         }
         else if (m_tOldPosPoints[pcEpuck].GetY() > m_fGateZone && cEpuckPosition.GetY() < m_fGateZone) {
+            //m_fObjectiveFunction+=1;
+        }
+
+        if (m_tOldPosPoints[pcEpuck].GetY() < cEpuckPosition.GetY()) {
+            reward-=1;
+        }
+        else if (m_tOldPosPoints[pcEpuck].GetY() > cEpuckPosition.GetY()) {
             reward+=1;
         }
     }
-    m_fObjectiveFunction += reward;
-    rewards.push_back(torch::tensor(reward*100));
+    m_fObjectiveFunction+=reward;
+    rewards.push_back(torch::tensor(reward));
     m_tOldPosPoints[pcEpuck] = cEpuckPosition;
   }
   
