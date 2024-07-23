@@ -17,6 +17,8 @@ DirectionalGate::DirectionalGate() {
   m_fObjectiveFunction = 0;
   m_fGateZone = 0;
   m_fWidthShelter = 0.5;
+  m_fHeightShelter = 0.33;
+  m_fLengthCorridor = 1.07;
 }
 
 /****************************************/
@@ -304,21 +306,39 @@ void DirectionalGate::PreStep() {
     // Reward computation
     float reward = 0.0;
     if (cEpuckPosition.GetX() < m_fWidthShelter/2 && cEpuckPosition.GetX() > -m_fWidthShelter/2) {
-        if (m_tOldPosPoints[pcEpuck].GetY() < m_fGateZone && cEpuckPosition.GetY() > m_fGateZone) {
-            //m_fObjectiveFunction-=1;
-        }
-        else if (m_tOldPosPoints[pcEpuck].GetY() > m_fGateZone && cEpuckPosition.GetY() < m_fGateZone) {
-            //m_fObjectiveFunction+=1;
-        }
+      // if (m_tOldPosPoints[pcEpuck].GetY() < m_fGateZone && cEpuckPosition.GetY() > m_fGateZone) {
+      //     //m_fObjectiveFunction-=1;
+      // }
+      // else if (m_tOldPosPoints[pcEpuck].GetY() > m_fGateZone && cEpuckPosition.GetY() < m_fGateZone) {
+      //     //m_fObjectiveFunction+=1;
+      // }
 
-        if (m_tOldPosPoints[pcEpuck].GetY() < cEpuckPosition.GetY()) {
-            reward-=1;
+      if (cEpuckPosition.GetY() < m_fHeightShelter/2 + m_fLengthCorridor && cEpuckPosition.GetY() > -m_fHeightShelter/2){
+        // moving in the black corridor
+        if (cEpuckPosition.GetY() < m_fLengthCorridor + m_fHeightShelter/2 && cEpuckPosition.GetY() > m_fHeightShelter/2){
+          if (m_tOldPosPoints[pcEpuck].GetY() < cEpuckPosition.GetY()) {
+              reward = -1;
+          }
+          else if (m_tOldPosPoints[pcEpuck].GetY() > cEpuckPosition.GetY()) {
+              reward = 1;
+          }
+        
+        // moving in the shelter
+        }else if (cEpuckPosition.GetY() < m_fHeightShelter/2 && cEpuckPosition.GetY() > -m_fHeightShelter/2){
+          if (m_tOldPosPoints[pcEpuck].GetY() < m_fGateZone && cEpuckPosition.GetY() > m_fGateZone) {
+              m_fObjectiveFunction-=1;
+              reward = -100;
+          }
+          else if (m_tOldPosPoints[pcEpuck].GetY() > m_fGateZone && cEpuckPosition.GetY() < m_fGateZone) {
+              m_fObjectiveFunction+=1;
+              reward = 100;
+          }
         }
-        else if (m_tOldPosPoints[pcEpuck].GetY() > cEpuckPosition.GetY()) {
-            reward+=1;
-        }
+      }
     }
-    m_fObjectiveFunction+=reward;
+    //m_fObjectiveFunction += reward;
+    //LOG << "reward = " << reward << std::endl;
+    //LOG << "Obj = " << m_fObjectiveFunction << std::endl;
     rewards.push_back(torch::tensor(reward));
     m_tOldPosPoints[pcEpuck] = cEpuckPosition;
   }

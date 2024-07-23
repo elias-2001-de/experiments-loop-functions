@@ -149,6 +149,8 @@ class DirectionalGate : public CoreLoopFunctions {
     TOldPosMap m_tOldPosPoints;
     Real m_fGateZone;
     Real m_fWidthShelter;
+    Real m_fHeightShelter;
+    Real m_fLengthCorridor;
 };
 
 #endif
