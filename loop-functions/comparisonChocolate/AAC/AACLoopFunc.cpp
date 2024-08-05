@@ -14,7 +14,7 @@
 /****************************************/
 
 AACLoopFunction::AACLoopFunction() {
-  m_fRadius = 0.3;
+  m_fRadius = 0.6;
   m_cCoordBlackSpot = CVector2(0,-0.6);
   pos_target = pos_target.index_put_({0}, m_cCoordBlackSpot.GetX());
   pos_target = pos_target.index_put_({1}, m_cCoordBlackSpot.GetY());
@@ -383,6 +383,10 @@ void AACLoopFunction::PostStep() {
 }
 
 void AACLoopFunction::Update(std::vector<MADDPGLoopFunction::Transition*> sample, int a){
+  
+  std::ofstream outfile;
+  outfile.open("debug_losses.txt", std::ios_base::app); // append instead of overwrite
+  
   //std::cout << "a value: " << a << std::endl;
   //std::cout << "sample: " << sample.size() << std::endl;
   //Critic model update
@@ -430,9 +434,12 @@ void AACLoopFunction::Update(std::vector<MADDPGLoopFunction::Transition*> sample
   // Calculate critic value without detaching
   torch::Tensor input_critic = torch::cat({states_batch, actions_batch}, 1);
   torch::Tensor critic_value = agents.at(a)->critic.forward(input_critic);
+  outfile << "a is " << a << std::endl;
+  
   //for (auto& layer : agents.at(a)->critic.hidden_layers) {
     //outfile << "Weights layer: " << layer->weight << std::endl;
   //}
+  
   //outfile << "Weights last layer: " << agents.at(a)->critic.output_layer->weight << std::endl;
   //outfile << "Critic value: " << critic_value << std::endl;
   //outfile << "Wrong critic value: " << critic_value[0] << std::endl;
@@ -459,7 +466,7 @@ void AACLoopFunction::Update(std::vector<MADDPGLoopFunction::Transition*> sample
 
 
   // Calculate gradient of loss
-  //outfile << "Weights before update:\n" << agents.at(a)->critic.parameters() << std::endl;
+  outfile << "Weights before update:\n" << agents.at(a)->critic.parameters() << std::endl;
 
   agents.at(a)->optimizer_critic->zero_grad();
   mse.backward();
@@ -510,6 +517,7 @@ void AACLoopFunction::Update(std::vector<MADDPGLoopFunction::Transition*> sample
   agents.at(a)->optimizer_actor->step();
 
   //std::cout << "After policy update" << std::endl;
+  outfile.close();
 }
 
 
