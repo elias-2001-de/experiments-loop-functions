@@ -340,7 +340,7 @@ void AACLoopFunction::PostStep() {
           torch::Tensor input_target_critic = torch::cat({next_states_batch, target_actions_batch}, 1);
           input_target_critic = input_target_critic.toType(torch::kFloat32); // Convert to float
           //torch::Tensor target_output = agents.at(a)->target_critic.forward(input_target_critic);
-          outfile << "Target Q-value: " << target_output << std::endl;
+          //outfile << "Target Q-value: " << target_output << std::endl;
           //outfile << "Weights target critic network:\n" << agents.at(a)->target_critic.parameters() << std::endl;
           torch::Tensor y = rewards_batch + gamma * agents.at(a)->target_critic.forward(input_target_critic);
           outfile << "Y value: " << y << std::endl;
@@ -456,7 +456,7 @@ void AACLoopFunction::PostExperiment() {
   LOG << "Time = " << fTimeStep << std::endl;
   LOG << "Score = " << m_fObjectiveFunction << std::endl;
   fEpisode += 1;
-  outfile << "Next episode: " << fEpisode << std::endl;
+  //outfile << "Next episode: " << fEpisode << std::endl;
   //std::cout << "NB transitions in buffer " << buffer.size() << std::endl;
   //outfile << "Critic weights: "  << agents.at(0)->critic.parameters() << std::endl;
   //outfile << "Actor weights: "  << agents.at(0)->actor.parameters() << std::endl;
