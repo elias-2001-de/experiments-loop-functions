@@ -384,8 +384,8 @@ void AACLoopFunction::PostStep() {
 
 void AACLoopFunction::Update(std::vector<MADDPGLoopFunction::Transition*> sample, int a){
   
-  std::ofstream outfile;
-  outfile.open("debug_losses.txt", std::ios_base::app); // append instead of overwrite
+  //std::ofstream outfile;
+  //outfile.open("debug_losses.txt", std::ios_base::app); // append instead of overwrite
   
   //std::cout << "a value: " << a << std::endl;
   //std::cout << "sample: " << sample.size() << std::endl;
@@ -434,7 +434,7 @@ void AACLoopFunction::Update(std::vector<MADDPGLoopFunction::Transition*> sample
   // Calculate critic value without detaching
   torch::Tensor input_critic = torch::cat({states_batch, actions_batch}, 1);
   torch::Tensor critic_value = agents.at(a)->critic.forward(input_critic);
-  outfile << "a is " << a << std::endl;
+  //outfile << "a is " << a << std::endl;
   
   //for (auto& layer : agents.at(a)->critic.hidden_layers) {
     //outfile << "Weights layer: " << layer->weight << std::endl;
@@ -466,7 +466,7 @@ void AACLoopFunction::Update(std::vector<MADDPGLoopFunction::Transition*> sample
 
 
   // Calculate gradient of loss
-  outfile << "Weights before update:\n" << agents.at(a)->critic.parameters() << std::endl;
+  //outfile << "Weights before update:\n" << agents.at(a)->critic.parameters() << std::endl;
 
   agents.at(a)->optimizer_critic->zero_grad();
   mse.backward();
@@ -517,7 +517,7 @@ void AACLoopFunction::Update(std::vector<MADDPGLoopFunction::Transition*> sample
   agents.at(a)->optimizer_actor->step();
 
   //std::cout << "After policy update" << std::endl;
-  outfile.close();
+  //outfile.close();
 }
 
 
@@ -703,12 +703,12 @@ void AACLoopFunction::RemoveArena() {
 
 float AACLoopFunction::GetCriticLoss() {
   std::cout << "Critic losses: " << critic_losses << std::endl;
-  float average = critic_losses / fTimeStepTraining;
+  float average = (critic_losses / fTimeStepTraining) * batch_step;
   return average;
 }
 
 float AACLoopFunction::GetActorLoss() {
-  float average = actor_losses / fTimeStepTraining;
+  float average = (actor_losses / fTimeStepTraining) * batch_step;
   return average;
 }
 

@@ -82,8 +82,7 @@ class CoreLoopFunctions: public CLoopFunctions {
 
     /*
      * Returns the Behavioral characterization vector, for repertoire generation
-     */
-    virtual std::vector<Real> GetSDBC() {}; 
+    virtual std::vector<Real> GetSDBC() {}; */
 
     /*
      * Sets the policy pointer
