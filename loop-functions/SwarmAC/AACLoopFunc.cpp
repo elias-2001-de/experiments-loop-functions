@@ -95,7 +95,6 @@ void AACLoopFunction::Reset() {
 /****************************************/
 
 void AACLoopFunction::Init(TConfigurationNode& t_tree) {
-  // std::cout << "INIT\n";
   CoreLoopFunctions::Init(t_tree);
   TConfigurationNode cParametersNode;
   cParametersNode = GetNode(t_tree, "params");
@@ -137,7 +136,6 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
   experimentNode = GetNode(frameworkNode, "experiment");
   GetNodeAttribute(experimentNode, "length", mission_length);
   mission_length *= 10;
-  // std::cout << "END INIT\n";
 }
 
 /****************************************/
@@ -162,7 +160,6 @@ argos::CColor AACLoopFunction::GetFloorColor(const argos::CVector2& c_position_o
 /****************************************/
 
 void AACLoopFunction::PreStep() {
-  // std::cout << "PRESET\n";
   int N = (critic_input_dim - 4)/5; // Number of closest neighbors to consider (4 absolute states + 5 relative states)
   std::vector<torch::Tensor> positions;
   CSpace::TMapPerType& tEpuckMap = GetSpace().GetEntitiesByType("epuck");

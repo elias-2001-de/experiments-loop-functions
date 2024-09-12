@@ -317,21 +317,21 @@ void DirectionalGate::PreStep() {
         // moving in the black corridor
         if (cEpuckPosition.GetY() < m_fLengthCorridor + m_fHeightShelter/2 && cEpuckPosition.GetY() > m_fHeightShelter/2){
           if (m_tOldPosPoints[pcEpuck].GetY() < cEpuckPosition.GetY()) {
-              reward = -0.01;
+              reward = 0;
           }
           else if (m_tOldPosPoints[pcEpuck].GetY() > cEpuckPosition.GetY()) {
-              reward = 0.01;
+              reward = 0;
           }
         
         // moving in the shelter
         }else if (cEpuckPosition.GetY() < m_fHeightShelter/2 && cEpuckPosition.GetY() > -m_fHeightShelter/2){
           if (m_tOldPosPoints[pcEpuck].GetY() < m_fGateZone && cEpuckPosition.GetY() > m_fGateZone) {
               m_fObjectiveFunction-=1;
-              reward = -1;
+              reward = -100;
           }
           else if (m_tOldPosPoints[pcEpuck].GetY() > m_fGateZone && cEpuckPosition.GetY() < m_fGateZone) {
               m_fObjectiveFunction+=1;
-              reward = 1;
+              reward = 100;
           }
         }
       }

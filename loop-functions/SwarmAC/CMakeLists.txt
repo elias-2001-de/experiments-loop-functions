@@ -5,12 +5,12 @@ add_library(swarmac_loopfunc SHARED
                           AACLoopFunc.cpp
                           SCALoopFunc.h
                           SCALoopFunc.cpp
-                          Corridor.h
-                          Corridor.cpp
-                          DirectionalGate.h
-                          DirectionalGate.cpp
-                          Foraging.h
-                          Foraging.cpp
+                          # Corridor.h
+                          # Corridor.cpp
+                          # DirectionalGate.h
+                          # DirectionalGate.cpp
+                          # Foraging.h
+                          # Foraging.cpp
                           ${LOOP_HEADERS}
                           ${LOOP_SOURCES})
 
