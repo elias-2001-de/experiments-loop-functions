@@ -138,8 +138,8 @@ class MADDPGLoopFunction : public CoreLoopFunctions {
     };
 
     struct Agent{
-        CEPuckEntity* pcEpuck;
-        CControllableEntity* pcEntity;
+        CEPuckEntity* pcEpuck = nullptr;
+        CControllableEntity* pcEntity = nullptr;
         Critic_Net critic;
         argos::CEpuckNNController::Actor_Net actor;
         argos::CEpuckNNController::Actor_Net target_actor;
@@ -152,8 +152,8 @@ class MADDPGLoopFunction : public CoreLoopFunctions {
         Agent(int64_t critic_input_dim = 6, int64_t critic_hidden_dim = 64, int64_t critic_num_hidden_layers = 3, int64_t critic_output_dim = 1, int64_t actor_input_dim = 25, int64_t actor_hidden_dim = 64, int64_t actor_num_hidden_layers = 3, 
                 int64_t actor_output_dim = 2, float lambda_actor = 0.9, float lambda_critic = 0.8, int size_value_net = 5, int size_policy_net = 52){
             //std::cout << "Before creation of a new agent" << "." << std::endl;
-            pcEpuck = nullptr;
-            pcEntity = nullptr;
+            //pcEpuck = nullptr;
+            //pcEntity = nullptr;
             //std::cout << "Critic input dim" << critic_input_dim << std::endl;
             std::cout << "Lambda actor " << lambda_actor << std::endl;
             critic = Critic_Net(critic_input_dim, critic_hidden_dim, critic_num_hidden_layers, critic_output_dim);
@@ -175,6 +175,10 @@ class MADDPGLoopFunction : public CoreLoopFunctions {
                 param.set_requires_grad(false);
             }
             //std::cout << "After creation of a new agent" << "." << std::endl;
+        }
+
+        void SetActor(const argos::CEpuckNNController::Actor_Net& new_actor) {
+            actor = new_actor;
         }
       };
 
@@ -212,6 +216,8 @@ class MADDPGLoopFunction : public CoreLoopFunctions {
       virtual float GetCriticLoss() {}
 
       virtual float GetEntropy() {}
+
+      virtual void SaveActor(std::string path) {}
 
 };
 

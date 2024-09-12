@@ -679,6 +679,14 @@ void AACLoopFunction::print_grid(at::Tensor grid){
     std::cout << "+" << std::endl;
 }
 
+void AACLoopFunction::SaveActor(std::string path) {
+  int i = 0;
+  for(MADDPGLoopFunction::Agent* a : agents){
+    i += 1;
+    torch::save(std::make_shared<argos::CEpuckNNController::Actor_Net>(a->actor), path + std::to_string(i) + ".pt");
+  }
+}
+
 void AACLoopFunction::SetTraining(bool value) {
     training = value;
 }

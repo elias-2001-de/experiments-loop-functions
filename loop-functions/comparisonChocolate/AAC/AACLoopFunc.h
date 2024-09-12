@@ -77,6 +77,8 @@ class AACLoopFunction : public MADDPGLoopFunction {
 
       virtual void SetControllerEpuckAgent();
 
+      virtual void SaveActor(std::string path);
+
     private:
       Real m_fRadius;
       CVector2 m_cCoordBlackSpot;
