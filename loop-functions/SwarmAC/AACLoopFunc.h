@@ -95,6 +95,7 @@ class AACLoopFunction : public CoreLoopFunctions {
       int actor_policy_size;
 
       int nb_robots;
+      int n_sensors;
 
       std::string actor_type; 
       std::string device_type = "cuda"; 
@@ -111,6 +112,7 @@ class AACLoopFunction : public CoreLoopFunctions {
 
       std::vector<torch::Tensor> states;
       std::vector<torch::Tensor> states_prime;
+      std::vector<torch::Tensor> observations;
 
       int size_value_net;
       int size_policy_net;
@@ -124,6 +126,9 @@ class AACLoopFunction : public CoreLoopFunctions {
 
       std::shared_ptr<torch::optim::Optimizer> optimizer_actor;
       std::shared_ptr<torch::optim::Optimizer> optimizer_critic;
+
+      std::vector<torch::Tensor> all_module_probabilities;
+      std::vector<int> selected_modules;
 
       std::vector<float> TDerrors;
       std::vector<float> Entropies;
