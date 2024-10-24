@@ -20,7 +20,7 @@
 #include <sstream> 
 
 #include "../../src/CoreLoopFunctions.h"
-#include "../../../AC_trainer/src/shared_mem.h"
+#include "../../../BC_trainer/src/shared_mem.h"
 #include "../../../argos3-nn/src/NNController.h"
 
 #include <typeinfo>

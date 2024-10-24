@@ -18,7 +18,7 @@
 #include <argos3/plugins/robots/e-puck/simulator/epuck_entity.h>
 
 // FIX not very clean
-#include "../../AC_trainer/src/shared_mem.h"
+#include "../../BC_trainer/src/shared_mem.h"
 #include "../../../argos3-nn/src/NNController.h"
 
 using namespace argos;
