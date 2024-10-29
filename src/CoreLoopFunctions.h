@@ -116,7 +116,8 @@ class CoreLoopFunctions: public CLoopFunctions {
      * The pointers to the shared memory containing the policy and the value
      */
     Critic_Net* critic_net;
-    argos::CEpuckNNController::ActorBase* actor_net;
+    argos::CEpuckNNController::Behavior* behavior_net;
+    argos::CEpuckNNController::Terminator* terminator_net;
 
     bool training;
     /*
@@ -149,7 +150,8 @@ class CoreLoopFunctions: public CLoopFunctions {
     /*
      * Sets the policy pointer
      */
-    virtual void SetPolicyPointer(argos::CEpuckNNController::ActorBase* policy);
+    virtual void SetBehaviorPointer(argos::CEpuckNNController::Behavior* behavior);
+    virtual void SetTerminatorPointer(argos::CEpuckNNController::Terminator* terminator);
 
     /*
      * Sets the value pointer

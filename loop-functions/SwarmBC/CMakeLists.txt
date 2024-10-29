@@ -3,8 +3,8 @@ find_package(Torch REQUIRED)
 add_library(swarmbc_loopfunc SHARED
                           AACLoopFunc.h
                           AACLoopFunc.cpp
-                          SCALoopFunc.h
-                          SCALoopFunc.cpp
+                          # SCALoopFunc.h
+                          # SCALoopFunc.cpp
                           # Corridor.h
                           # Corridor.cpp
                           # DirectionalGate.h

@@ -78,8 +78,12 @@ void CoreLoopFunctions::RemoveRobots() {
   }
 }
 
-void CoreLoopFunctions::SetPolicyPointer(argos::CEpuckNNController::ActorBase* policy) {
-    actor_net = policy;
+void CoreLoopFunctions::SetBehaviorPointer(argos::CEpuckNNController::Behavior* behavior) {
+    behavior_net = behavior;
+}
+
+void CoreLoopFunctions::SetTerminatorPointer(argos::CEpuckNNController::Terminator* terminator) {
+    terminator_net = terminator;
 }
 
 void CoreLoopFunctions::SetValuePointer(Critic_Net* value) {

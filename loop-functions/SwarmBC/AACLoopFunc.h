@@ -105,26 +105,31 @@ class AACLoopFunction : public CoreLoopFunctions {
       
       // Learning variables
       std::unordered_map<std::string, torch::Tensor> eligibility_trace_critic;
-      std::unordered_map<std::string, torch::Tensor> eligibility_trace_actor;
+      std::unordered_map<std::string, torch::Tensor> eligibility_trace_behavior;
+      std::unordered_map<std::string, torch::Tensor> eligibility_trace_terminator;
       std::vector<float> value_param;
-      std::vector<float> policy_param;
-      float I;
+      std::vector<float> behavior_param;
+      std::vector<float> terminator_param;
 
       std::vector<torch::Tensor> states;
       std::vector<torch::Tensor> states_prime;
       std::vector<torch::Tensor> observations;
 
       int size_value_net;
-      int size_policy_net;
+      int size_behavior_net;
+      int size_terminator_net;
 
       float gamma;
       float lambda_critic;
       float alpha_critic;
-      float lambda_actor;
-      float alpha_actor;
+      float lambda_behavior;
+      float alpha_behavior;
+      float lambda_terminator;
+      float alpha_terminator;
       float entropy_fact;
 
-      std::shared_ptr<torch::optim::Optimizer> optimizer_actor;
+      std::shared_ptr<torch::optim::Optimizer> optimizer_behavior;
+      std::shared_ptr<torch::optim::Optimizer> optimizer_terminator;
       std::shared_ptr<torch::optim::Optimizer> optimizer_critic;
 
       std::vector<torch::Tensor> all_module_probabilities;

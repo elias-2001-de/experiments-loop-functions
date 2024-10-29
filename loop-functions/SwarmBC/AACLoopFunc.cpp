@@ -45,7 +45,8 @@ void AACLoopFunction::Reset() {
 
   // Clear existing eligibility traces and initialize them on the device
   eligibility_trace_critic.clear();
-  eligibility_trace_actor.clear();
+  eligibility_trace_behavior.clear();
+  eligibility_trace_terminator.clear();
 
   for (const auto& named_param : critic_net->named_parameters()) {
       if (named_param.value().requires_grad()) {
@@ -57,25 +58,36 @@ void AACLoopFunction::Reset() {
       }
   }
 
-  for (const auto& named_param : actor_net->named_parameters()) {
+  for (const auto& named_param : behavior_net->named_parameters()) {
     if (named_param.value().requires_grad()) {
         try {
-            eligibility_trace_actor[named_param.key()] = torch::zeros_like(named_param.value()).to(device);
+            eligibility_trace_behavior[named_param.key()] = torch::zeros_like(named_param.value()).to(device);
         } catch (const std::exception& ex) {
-            std::cerr << "Error while initializing eligibility_trace_actor for " << named_param.key() << ": " << ex.what() << std::endl;
+            std::cerr << "Error while initializing eligibility_trace_behavior for " << named_param.key() << ": " << ex.what() << std::endl;
         }
     }
   }
 
-  optimizer_actor = std::make_shared<torch::optim::Adam>(actor_net->parameters(), torch::optim::AdamOptions(alpha_critic));
-  optimizer_critic = std::make_shared<torch::optim::Adam>(critic_net->parameters(), torch::optim::AdamOptions(alpha_actor));
+  for (const auto& named_param : terminator_net->named_parameters()) {
+    if (named_param.value().requires_grad()) {
+        try {
+            eligibility_trace_terminator[named_param.key()] = torch::zeros_like(named_param.value()).to(device);
+        } catch (const std::exception& ex) {
+            std::cerr << "Error while initializing eligibility_trace_terminator for " << named_param.key() << ": " << ex.what() << std::endl;
+        }
+    }
+  }
+
+  optimizer_critic = std::make_shared<torch::optim::Adam>(critic_net->parameters(), torch::optim::AdamOptions(alpha_critic));
+  optimizer_behavior = std::make_shared<torch::optim::Adam>(behavior_net->parameters(), torch::optim::AdamOptions(alpha_behavior));
+  optimizer_terminator = std::make_shared<torch::optim::Adam>(terminator_net->parameters(), torch::optim::AdamOptions(alpha_terminator));
   optimizer_critic->zero_grad();
-  optimizer_actor->zero_grad();
+  optimizer_behavior->zero_grad();
+  optimizer_terminator->zero_grad();
   //std::cout << "[loop] actor device: " << actor_net->parameters().front().device() << std::endl;;
   //std::cout << "[loop] critic device: " << critic_net->parameters().front().device() << std::endl;;
 
-  I = 1;
-
+  
   TDerrors.resize(mission_length);
   std::fill(TDerrors.begin(), TDerrors.end(), 0.0f);
 
@@ -103,15 +115,11 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
   cParametersNode = GetNode(t_tree, "params");
 
   GetNodeAttribute(cParametersNode, "number_robots", nb_robots);
-  GetNodeAttribute(cParametersNode, "actor_type", actor_type);
 
   TConfigurationNode criticParameters;
   criticParameters = GetNode(t_tree, "critic");
   
   GetNodeAttribute(criticParameters, "input_dim", critic_input_dim);
-  GetNodeAttribute(criticParameters, "hidden_dim", critic_hidden_dim);
-  GetNodeAttribute(criticParameters, "num_hidden_layers", critic_num_hidden_layers);
-  GetNodeAttribute(criticParameters, "output_dim", critic_output_dim);
   GetNodeAttribute(criticParameters, "lambda_critic", lambda_critic);
   GetNodeAttribute(criticParameters, "alpha_critic", alpha_critic);
   GetNodeAttribute(criticParameters, "gamma", gamma);
@@ -125,21 +133,14 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
   controllerNode = GetNode(parentNode, "controllers");
   actorNode = GetNode(controllerNode, actor_type + "_controller");
   actorParameters = GetNode(actorNode, "actor");
-  GetNodeAttribute(actorParameters, "input_dim", actor_input_dim);
-  GetNodeAttribute(actorParameters, "hidden_dim", actor_hidden_dim);
-  GetNodeAttribute(actorParameters, "num_hidden_layers", actor_num_hidden_layers);
   GetNodeAttribute(actorParameters, "output_dim", actor_output_dim);
-  GetNodeAttribute(actorParameters, "lambda_actor", lambda_actor);
-  GetNodeAttribute(actorParameters, "alpha_actor", alpha_actor);
+  GetNodeAttribute(actorParameters, "lambda_actor", lambda_behavior);
+  GetNodeAttribute(actorParameters, "alpha_actor", alpha_behavior);
   GetNodeAttribute(actorParameters, "entropy", entropy_fact);
 
-  if (actor_type == "dandel") {
-    actor_net = dynamic_cast<argos::CEpuckNNController::Dandel*>(actor_net);
-    n_sensors = 16;
-  }else if (actor_type == "daisy"){
-    actor_net = dynamic_cast<argos::CEpuckNNController::Daisy*>(actor_net);
-    n_sensors = 22;
-  }
+  behavior_net = dynamic_cast<argos::CEpuckNNController::Behavior*>(behavior_net);
+  terminator_net = dynamic_cast<argos::CEpuckNNController::Terminator*>(terminator_net);
+  n_sensors = 22;
 
   TConfigurationNode frameworkNode;
   TConfigurationNode experimentNode;
@@ -255,42 +256,44 @@ void AACLoopFunction::PreStep() {
       m_fObjectiveFunction += reward;
     }
     states = positions;
+
+    /// Initialize starting states
+    CSpace::TMapPerType cEntities = GetSpace().GetEntitiesByType("controller");
+    int i = 0;
+
+    for (auto it = cEntities.begin(); it != cEntities.end(); ++it) {
+      CControllableEntity *pcEntity = any_cast<CControllableEntity *>(it->second);
+      CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
+
+      /// Update starting State
+      cController.SetStartState(states[i]); 
+      
+      // Set initial behavior
+      observations[i] = cController.GetObservations();
+      torch::Tensor module_probabilities = dynamic_cast<argos::CEpuckNNController::Behavior*>(behavior_net)->forward(observations[i]);
+      all_module_probabilities[i] = module_probabilities;
+      selected_modules[i] = module_probabilities.multinomial(1).item<int>();
+      cController.SetSelectedModule(selected_modules[i]);
+
+      i++;
+    }
   }
-
-  // Launch the experiment with the correct random seed and network,
-  // and evaluate the average fitness
-
+  
   CSpace::TMapPerType cEntities = GetSpace().GetEntitiesByType("controller");
-  int i = 0;
 
-  /// ACTOR DECISION
-  i = 0;
+  /// Terminator decision per robot
+  int i=0;
   for (auto it = cEntities.begin(); it != cEntities.end(); ++it) {
     CControllableEntity *pcEntity = any_cast<CControllableEntity *>(it->second);
     try {
-        CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
+      CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
 
-        if (actor_type == "daisy") {
-            // Use GPU tensor for forward pass
-            //auto start = std::chrono::high_resolution_clock::now();
-            observations[i] = cController.GetObservations();
-            // auto end = std::chrono::high_resolution_clock::now();
-            // auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-            // std::cout << "Execution time GetObservations: " << duration.count() << " microseconds" << std::endl;
-
-            //start = std::chrono::high_resolution_clock::now();
-            torch::Tensor module_probabilities = dynamic_cast<argos::CEpuckNNController::Daisy*>(actor_net)->forward(observations[i]);
-            //end = std::chrono::high_resolution_clock::now();
-            //duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-            //std::cout << "Execution time forward: " << duration.count() << " microseconds" << std::endl;
-
-            all_module_probabilities[i] = module_probabilities;
-            selected_modules[i] = module_probabilities.multinomial(1).item<int>();
-            cController.SetSelectedModule(selected_modules[i]);
-        }
-        i++;
+      observations[i] = cController.GetObservations();
+      torch::Tensor termination = dynamic_cast<argos::CEpuckNNController::Terminator*>(terminator_net)->forward(observations[i]);
+      if(termination.item<bool>()) cController.Terminate();
+      i++;
     } catch (std::exception &ex) {
-        LOGERR << "Error while setting network: " << ex.what() << std::endl;
+        LOGERR << "Error while deciding termination: " << ex.what() << std::endl;
     }
   }
 }
@@ -412,25 +415,25 @@ void AACLoopFunction::PostStep() {
         i++;
       }
 
-      torch::Tensor log_probs_batch = torch::stack(log_probs).unsqueeze(1);
-      torch::Tensor policy_loss = -(log_probs_batch * td_errors.detach()).mean();
+      // torch::Tensor log_probs_batch = torch::stack(log_probs).unsqueeze(1);
+      // torch::Tensor policy_loss = -(log_probs_batch * td_errors.detach()).mean();
 
-      torch::Tensor entropy_batch = torch::stack(entropies).unsqueeze(1);
-      policy_loss -= entropy_fact * entropy_batch.mean();
+      // torch::Tensor entropy_batch = torch::stack(entropies).unsqueeze(1);
+      // policy_loss -= entropy_fact * entropy_batch.mean();
 
-      actor_losses[fTimeStep] = policy_loss.item<float>();
-      Entropies[fTimeStep] = entropy_batch.mean().item<float>();
-      optimizer_actor->zero_grad();
-      policy_loss.backward();
-      for (auto& named_param : actor_net->named_parameters()) {
-        if (named_param.value().grad().defined()) {
-          eligibility_trace_actor[named_param.key()].mul_(gamma * lambda_actor).add_(named_param.value().grad() * I);
-          named_param.value().mutable_grad() = eligibility_trace_actor[named_param.key()];
-        }
-      }
-      optimizer_actor->step();
+      // actor_losses[fTimeStep] = policy_loss.item<float>();
+      // Entropies[fTimeStep] = entropy_batch.mean().item<float>();
+      // optimizer_actor->zero_grad();
+      // policy_loss.backward();
+      // for (auto& named_param : actor_net->named_parameters()) {
+      //   if (named_param.value().grad().defined()) {
+      //     eligibility_trace_actor[named_param.key()].mul_(gamma * lambda_actor).add_(named_param.value().grad() * I);
+      //     named_param.value().mutable_grad() = eligibility_trace_actor[named_param.key()];
+      //   }
+      // }
+      // optimizer_actor->step();
 
-      I *= gamma;
+      // I *= gamma;
     }catch (std::exception &ex) {
       LOGERR << "Error in training loop: " << ex.what() << std::endl;
     }
