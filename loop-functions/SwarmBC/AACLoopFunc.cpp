@@ -455,7 +455,7 @@ void AACLoopFunction::PostStep() {
       torch::Tensor log_continue_probs_batch = torch::stack(log_continue_probs).unsqueeze(1).to(device);
 
       torch::Tensor terminator_loss = - ((terms_batch * log_term_probs_batch + (1 - terms_batch) * log_continue_probs_batch) 
-                                      * td_errors.detach()).mean();;
+                                      * td_errors.detach()).mean();
       optimizer_terminator->zero_grad();
       terminator_loss.backward();
       for (auto& named_param : terminator_net->named_parameters()) {
