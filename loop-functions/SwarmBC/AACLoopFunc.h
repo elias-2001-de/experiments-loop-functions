@@ -133,6 +133,7 @@ class AACLoopFunction : public CoreLoopFunctions {
       std::shared_ptr<torch::optim::Optimizer> optimizer_critic;
 
       std::vector<torch::Tensor> all_module_probabilities;
+      std::vector<torch::Tensor> termination_probabilities;
       std::vector<int> selected_modules;
 
       std::vector<float> TDerrors;
