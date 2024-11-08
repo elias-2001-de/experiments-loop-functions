@@ -131,7 +131,7 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
   TConfigurationNode controllerNode;
   TConfigurationNode actorNode;
   controllerNode = GetNode(parentNode, "controllers");
-  actorNode = GetNode(controllerNode, actor_type + "_controller");
+  actorNode = GetNode(controllerNode, "sbc_controller");
   actorParameters = GetNode(actorNode, "actor");
   GetNodeAttribute(actorParameters, "output_dim", actor_output_dim);
   GetNodeAttribute(actorParameters, "lambda_actor", lambda_behavior);
@@ -187,6 +187,7 @@ argos::CColor AACLoopFunction::GetFloorColor(const argos::CVector2& c_position_o
 /****************************************/
 
 void AACLoopFunction::PreStep() {
+  std::cout <<"step= " << fTimeStep << std::endl;
   if (fTimeStep == 0)
   {
     std::vector<torch::Tensor> positions;
@@ -258,26 +259,27 @@ void AACLoopFunction::PreStep() {
     }
     states = positions;
 
-    /// Initialize starting states
-    CSpace::TMapPerType cEntities = GetSpace().GetEntitiesByType("controller");
-    int i = 0;
+    // /// Initialize starting states
+    // CSpace::TMapPerType cEntities = GetSpace().GetEntitiesByType("controller");
+    // int i = 0;
 
-    for (auto it = cEntities.begin(); it != cEntities.end(); ++it) {
-      CControllableEntity *pcEntity = any_cast<CControllableEntity *>(it->second);
-      CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
+    // for (auto it = cEntities.begin(); it != cEntities.end(); ++it) {
+    //   CControllableEntity *pcEntity = any_cast<CControllableEntity *>(it->second);
+    //   CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
 
-      /// Update starting State
-      cController.SetStartState(states[i]); 
+    //   /// Update starting State
+    //   cController.SetStartState(states[i]); 
       
-      // Set initial behavior
-      observations[i] = cController.GetObservations();
-      torch::Tensor module_probabilities = dynamic_cast<argos::CEpuckNNController::Behavior*>(behavior_net)->forward(observations[i]);
-      all_module_probabilities[i] = module_probabilities;
-      selected_modules[i] = module_probabilities.multinomial(1).item<int>();
-      cController.SetSelectedModule(selected_modules[i]);
+    //   // Set initial behavior
+    //   observations[i] = cController.GetObservations();
+    //   torch::Tensor module_probabilities = dynamic_cast<argos::CEpuckNNController::Behavior*>(behavior_net)->forward(observations[i]);
+    //   all_module_probabilities[i] = module_probabilities;
+    //   selected_modules[i] = module_probabilities.multinomial(1).item<int>();
+    //   cController.SetSelectedModule(selected_modules[i]);
 
-      i++;
-    }
+    //   i++;
+    // }
+    // std::cout << "Prestep step 0 observatrions: " << observations << std::endl;
   }
   
   CSpace::TMapPerType cEntities = GetSpace().GetEntitiesByType("controller");
@@ -290,6 +292,17 @@ void AACLoopFunction::PreStep() {
       CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
 
       observations[i] = cController.GetObservations();
+
+      if(fTimeStep == 0){
+        /// Update starting State
+        cController.SetStartState(states[i]); 
+        // Set initial behavior
+        torch::Tensor module_probabilities = dynamic_cast<argos::CEpuckNNController::Behavior*>(behavior_net)->forward(observations[i]);
+        all_module_probabilities[i] = module_probabilities;
+        selected_modules[i] = module_probabilities.multinomial(1).item<int>();
+        cController.SetSelectedModule(selected_modules[i]);
+      }
+
       torch::Tensor termination = dynamic_cast<argos::CEpuckNNController::Terminator*>(terminator_net)->forward(observations[i]);
       if(termination.item<bool>()) cController.Terminate();
       termination_probabilities[i] = termination;
@@ -298,6 +311,8 @@ void AACLoopFunction::PreStep() {
         LOGERR << "Error while deciding termination: " << ex.what() << std::endl;
     }
   }
+  std::cout << "Prestep observatrions: " << observations << std::endl;
+
 }
 
 
@@ -431,12 +446,16 @@ void AACLoopFunction::PostStep() {
       torch::Tensor cumulate_rewards_batch = torch::stack(cumulate_rewards).unsqueeze(1).to(device);
       torch::Tensor taus_batch = torch::stack(taus).unsqueeze(1).to(device);
       torch::Tensor startStates_batch = torch::stack(startStates).unsqueeze(1).to(device);
-      torch::Tensor log_probs_batch = torch::stack(log_probs).unsqueeze(1).to(device);
-      torch::Tensor entropy_batch = torch::stack(entropies).unsqueeze(1).to(device);
+      torch::Tensor log_probs_batch = torch::stack(log_probs).unsqueeze(1);
+      torch::Tensor entropy_batch = torch::stack(entropies).unsqueeze(1);
+      torch::Tensor v_state_detached = critic_net->forward(state_batch).detach();
+      torch::Tensor v_startStates_detached = critic_net->forward(startStates_batch).detach();
+      torch::Tensor log_term_probs_batch = torch::stack(log_term_probs).unsqueeze(1).to(device);
+      torch::Tensor log_continue_probs_batch = torch::stack(log_continue_probs).unsqueeze(1).to(device);
 
-      torch::Tensor behavior_loss = -(torch::sum(terms_batch * Is_batch * ((cumulate_rewards_batch + torch::pow(gamma, taus_batch)
-                                    * critic_net->forward(state_batch) - critic_net->forward(startStates_batch))
-                                    * log_probs_batch + entropy_fact*entropy_batch))) / torch::sum(terms_batch);
+      torch::Tensor behavior_loss = - torch::sum(terms_batch * Is_batch * ((cumulate_rewards_batch + torch::pow(gamma, taus_batch)
+                                    * v_state_detached - v_startStates_detached) * log_probs_batch) + entropy_fact * entropy_batch)
+                                    / torch::sum(terms_batch);
 
       actor_losses[fTimeStep] = behavior_loss.item<float>();
       Entropies[fTimeStep] = entropy_batch.mean().item<float>();
@@ -450,10 +469,22 @@ void AACLoopFunction::PostStep() {
       }
       optimizer_behavior->step();
 
-      //Terminator update
-      torch::Tensor log_term_probs_batch = torch::stack(log_term_probs).unsqueeze(1).to(device);
-      torch::Tensor log_continue_probs_batch = torch::stack(log_continue_probs).unsqueeze(1).to(device);
+      i = 0;
+      for (auto& it : cEntities) {
+        CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(any_cast<CControllableEntity*>(it.second)->GetController());
+        bool term = cController.GetTerm();
+        if(term){
+          observations[i] = cController.GetObservations();
+          torch::Tensor module_probabilities = dynamic_cast<argos::CEpuckNNController::Behavior*>(behavior_net)->forward(observations[i]);
+          all_module_probabilities[i] = module_probabilities;
+          selected_modules[i] = module_probabilities.multinomial(1).item<int>();
+          cController.SetSelectedModule(selected_modules[i]);
+        }
+        i++;
+      }
+      std::cout << "Poststep Observation: " << observations << std::endl;
 
+      //Terminator update
       torch::Tensor terminator_loss = - ((terms_batch * log_term_probs_batch + (1 - terms_batch) * log_continue_probs_batch) 
                                       * td_errors.detach()).mean();
       optimizer_terminator->zero_grad();
@@ -473,7 +504,7 @@ void AACLoopFunction::PostStep() {
     states = states_prime;
   }
   fTimeStep += 1;
-}
+} 
 
 /****************************************/
 /****************************************/
