@@ -69,8 +69,8 @@ void AACLoopFunction::Reset() {
 
   optimizer_actor = std::make_shared<torch::optim::Adam>(actor_net->parameters(), torch::optim::AdamOptions(alpha_critic));
   optimizer_critic = std::make_shared<torch::optim::Adam>(critic_net->parameters(), torch::optim::AdamOptions(alpha_actor));
-  optimizer_critic->zero_grad();
   optimizer_actor->zero_grad();
+  optimizer_critic->zero_grad();
   //std::cout << "[loop] actor device: " << actor_net->parameters().front().device() << std::endl;;
   //std::cout << "[loop] critic device: " << critic_net->parameters().front().device() << std::endl;;
 
@@ -289,6 +289,7 @@ void AACLoopFunction::PreStep() {
             cController.SetSelectedModule(selected_modules[i]);
         }
         i++;
+        std::cout << "Prestep observatrions: " << observations << std::endl;
     } catch (std::exception &ex) {
         LOGERR << "Error while setting network: " << ex.what() << std::endl;
     }
