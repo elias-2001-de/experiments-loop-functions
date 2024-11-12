@@ -445,7 +445,7 @@ void AACLoopFunction::PostStep() {
       actor_losses[fTimeStep] = behavior_loss.item<float>();
       Entropies[fTimeStep] = entropy_batch.mean().item<float>();
       optimizer_behavior->zero_grad();
-      behavior_loss.backward();//{}, /*retain_graph=*/c10::optional<bool>(true));
+      behavior_loss.backward();
       for (auto& named_param : behavior_net->named_parameters()) {
         if (named_param.value().grad().defined()) {
           eligibility_trace_behavior[named_param.key()].mul_(gamma * lambda_behavior).add_(named_param.value().grad());
@@ -463,6 +463,7 @@ void AACLoopFunction::PostStep() {
           all_module_probabilities[i] = module_probabilities;
           selected_modules[i] = module_probabilities.multinomial(1).item<int>();
           cController.SetSelectedModule(selected_modules[i]);
+          cController.SetStartState(states_prime[i]); 
         }
         i++;
       }
