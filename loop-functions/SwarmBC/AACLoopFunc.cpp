@@ -257,20 +257,6 @@ void AACLoopFunction::PreStep() {
       m_fObjectiveFunction += reward;
     }
     states = positions;
-
-    /// Initialize starting states
-    CSpace::TMapPerType cEntities = GetSpace().GetEntitiesByType("controller");
-    int i = 0;
-
-    for (auto it = cEntities.begin(); it != cEntities.end(); ++it) {
-      CControllableEntity *pcEntity = any_cast<CControllableEntity *>(it->second);
-      CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
-
-      /// Update starting State
-      cController.SetStartState(states[i]); 
-
-      i++;
-    }
   }
   
   CSpace::TMapPerType cEntities = GetSpace().GetEntitiesByType("controller");
@@ -284,20 +270,28 @@ void AACLoopFunction::PreStep() {
       observations[i] = cController.GetObservations();
 
       if(fTimeStep == 0){
+        cController.SetStartState(states[i]); 
         torch::Tensor module_probabilities = dynamic_cast<argos::CEpuckNNController::Behavior*>(behavior_net)->forward(observations[i]);
         all_module_probabilities[i] = module_probabilities;
         selected_modules[i] = module_probabilities.multinomial(1).item<int>();
         cController.SetSelectedModule(selected_modules[i]);
       }
       torch::Tensor termination = dynamic_cast<argos::CEpuckNNController::Terminator*>(terminator_net)->forward(observations[i]);
-      if(termination.item<bool>()) cController.Terminate();
+      //if(termination.item<bool>() && fTimeStep > 0){
+      if(fTimeStep > 0){
+        cController.Terminate();
+        torch::Tensor module_probabilities = dynamic_cast<argos::CEpuckNNController::Behavior*>(behavior_net)->forward(observations[i]);//.clone());
+        all_module_probabilities[i] = module_probabilities;
+        selected_modules[i] = module_probabilities.multinomial(1).item<int>();
+        cController.SetSelectedModule(selected_modules[i]);
+        cController.SetStartState(states[i]); 
+      }
       termination_probabilities[i] = termination;
       i++;
     } catch (std::exception &ex) {
         LOGERR << "Error while deciding termination: " << ex.what() << std::endl;
     }
   }
-
 }
 
 
@@ -454,32 +448,18 @@ void AACLoopFunction::PostStep() {
       }
       optimizer_behavior->step();
 
-      i = 0;
-      for (auto& it : cEntities) {
-        CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(any_cast<CControllableEntity*>(it.second)->GetController());
-        bool term = cController.GetTerm();
-        if(term){
-          torch::Tensor module_probabilities = dynamic_cast<argos::CEpuckNNController::Behavior*>(behavior_net)->forward(observations[i].clone());
-          all_module_probabilities[i] = module_probabilities;
-          selected_modules[i] = module_probabilities.multinomial(1).item<int>();
-          cController.SetSelectedModule(selected_modules[i]);
-          cController.SetStartState(states_prime[i]); 
-        }
-        i++;
-      }
-
       //Terminator update
-      torch::Tensor terminator_loss = - ((terms_batch * log_term_probs_batch + (1 - terms_batch) * log_continue_probs_batch) 
-                                      * td_errors.detach()).mean();
-      optimizer_terminator->zero_grad();
-      terminator_loss.backward();
-      for (auto& named_param : terminator_net->named_parameters()) {
-        if (named_param.value().grad().defined()) {
-          eligibility_trace_terminator[named_param.key()].mul_(gamma * lambda_terminator).add_(named_param.value().grad());
-          named_param.value().mutable_grad() = eligibility_trace_terminator[named_param.key()];
-        }
-      }
-      optimizer_terminator->step();
+      // torch::Tensor terminator_loss = - ((terms_batch * log_term_probs_batch + (1 - terms_batch) * log_continue_probs_batch) 
+      //                                 * td_errors.detach()).mean();
+      // optimizer_terminator->zero_grad();
+      // terminator_loss.backward();
+      // for (auto& named_param : terminator_net->named_parameters()) {
+      //   if (named_param.value().grad().defined()) {
+      //     eligibility_trace_terminator[named_param.key()].mul_(gamma * lambda_terminator).add_(named_param.value().grad());
+      //     named_param.value().mutable_grad() = eligibility_trace_terminator[named_param.key()];
+      //   }
+      // }
+      // optimizer_terminator->step();
 
     }catch (std::exception &ex) {
       LOGERR << "Error in training loop: " << ex.what() << std::endl;

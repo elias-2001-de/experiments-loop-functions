@@ -141,6 +141,8 @@ class AACLoopFunction : public CoreLoopFunctions {
       std::vector<float> critic_losses;
       std::vector<float> actor_losses;
       std::vector<float> behav_hist;
+
+      CSpace::TMapPerType epuckEntities;
 };
 
 #endif
