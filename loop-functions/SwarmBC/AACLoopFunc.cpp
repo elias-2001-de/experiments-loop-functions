@@ -187,7 +187,7 @@ argos::CColor AACLoopFunction::GetFloorColor(const argos::CVector2& c_position_o
 /****************************************/
 
 void AACLoopFunction::PreStep() {
-  if (fTimeStep == 0)
+  if (fTimeStep == 0 || not training)
   {
     std::vector<torch::Tensor> positions;
     CSpace::TMapPerType& tEpuckMap = GetSpace().GetEntitiesByType("epuck");
@@ -268,25 +268,16 @@ void AACLoopFunction::PreStep() {
     try {
       CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
       observations[i] = cController.GetObservations();
-
-      if(fTimeStep == 0){
-        cController.SetStartState(states[i]); 
-        torch::Tensor module_probabilities = dynamic_cast<argos::CEpuckNNController::Behavior*>(behavior_net)->forward(observations[i]);
-        all_module_probabilities[i] = module_probabilities;
-        selected_modules[i] = module_probabilities.multinomial(1).item<int>();
-        cController.SetSelectedModule(selected_modules[i]);
-      }
-      torch::Tensor termination = dynamic_cast<argos::CEpuckNNController::Terminator*>(terminator_net)->forward(observations[i]);
-      //if(termination.item<bool>() && fTimeStep > 0){
-      if(fTimeStep > 0){
-        cController.Terminate();
-        torch::Tensor module_probabilities = dynamic_cast<argos::CEpuckNNController::Behavior*>(behavior_net)->forward(observations[i]);//.clone());
-        all_module_probabilities[i] = module_probabilities;
-        selected_modules[i] = module_probabilities.multinomial(1).item<int>();
-        cController.SetSelectedModule(selected_modules[i]);
-        cController.SetStartState(states[i]); 
-      }
+      torch::Tensor termination = terminator_net->forward(observations[i]);
       termination_probabilities[i] = termination;
+      if(termination.item<float>() > 0.5) cController.Terminate();
+      if(fTimeStep == 0 || cController.GetTerm()){
+        cController.SetStartState(states[i]); 
+        torch::Tensor module_probabilities = behavior_net->forward(observations[i]);
+        all_module_probabilities[i] = module_probabilities;
+        selected_modules[i] = module_probabilities.multinomial(1).item<int>();
+        cController.SetSelectedModule(selected_modules[i]);
+      }
       i++;
     } catch (std::exception &ex) {
         LOGERR << "Error while deciding termination: " << ex.what() << std::endl;
@@ -399,67 +390,65 @@ void AACLoopFunction::PostStep() {
       }
       optimizer_critic->step();
 
-
       //Behavior update
-      std::vector<torch::Tensor> terms, Is, cumulate_rewards, taus, startStates, log_probs, entropies, log_term_probs, log_continue_probs;
       CSpace::TMapPerType cEntities = GetSpace().GetEntitiesByType("controller");
+      std::vector<torch::Tensor> terms, log_term_probs, log_continue_probs;
       int i = 0;
       for (auto& it : cEntities) {
         CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(any_cast<CControllableEntity*>(it.second)->GetController());
         cController.CumulateReward(rewards[i].item<float>());
         terms.push_back(torch::tensor(cController.GetTerm()));
-        Is.push_back(torch::tensor(cController.GetTerm()));
-        cumulate_rewards.push_back(torch::tensor(cController.GetCumulateReward()));
-        taus.push_back(torch::tensor(cController.GetTau()));
-        startStates.push_back(cController.GetStartState());
-        log_probs.push_back(torch::log(all_module_probabilities[i][selected_modules[i]]));
-        entropies.push_back(-torch::sum(all_module_probabilities[i] * torch::log(all_module_probabilities[i] + 1e-20)));
         log_term_probs.push_back(torch::log(termination_probabilities[i]));
         log_continue_probs.push_back(torch::log(1-termination_probabilities[i]));
+        if (cController.GetTerm()) {  // Check if the robot has terminated its behavior
+          // Prepare tensors for the robot
+          torch::Tensor Is = torch::tensor(cController.GetTerm()); // Importance sampling weight
+          torch::Tensor cumulate_reward = torch::tensor(cController.GetCumulateReward());
+          torch::Tensor tau = torch::tensor(cController.GetTau());
+          torch::Tensor start_state = cController.GetStartState();
+          torch::Tensor log_prob = torch::log(all_module_probabilities[i][selected_modules[i]]);  // Log probability for the robot
+          torch::Tensor entropy = -torch::sum(all_module_probabilities[i] * torch::log(all_module_probabilities[i] + 1e-20));   // Entropy term
+
+          // Forward pass for the critic network
+          torch::Tensor v_state = critic_net->forward(states_prime[i]).detach();
+          torch::Tensor v_startState = critic_net->forward(start_state).detach();
+
+          // Compute behavior loss for the robot
+          torch::Tensor behavior_loss = -Is * 
+              ((cumulate_reward + torch::pow(gamma, tau) * v_state - v_startState) * log_prob + 
+              entropy_fact * entropy);
+
+          // Backward pass for this robot
+          optimizer_behavior->zero_grad();
+          behavior_loss.backward();
+          for (auto& named_param : behavior_net->named_parameters()) {
+            if (named_param.value().grad().defined()) {
+              eligibility_trace_behavior[named_param.key()].mul_(gamma * lambda_behavior).add_(named_param.value().grad());
+              named_param.value().mutable_grad() = eligibility_trace_behavior[named_param.key()];
+            }
+          }
+          optimizer_behavior->step();
+        }
         behav_hist[selected_modules[i]] += 1;
         i++;
       }
-      
+
+      //Terminator updates
       torch::Tensor terms_batch = torch::stack(terms).unsqueeze(1).to(device);
-      torch::Tensor Is_batch = torch::stack(Is).unsqueeze(1).to(device);
-      torch::Tensor cumulate_rewards_batch = torch::stack(cumulate_rewards).unsqueeze(1).to(device);
-      torch::Tensor taus_batch = torch::stack(taus).unsqueeze(1).to(device);
-      torch::Tensor startStates_batch = torch::stack(startStates).unsqueeze(1).to(device);
-      torch::Tensor log_probs_batch = torch::stack(log_probs).unsqueeze(1);
-      torch::Tensor entropy_batch = torch::stack(entropies).unsqueeze(1);
-      torch::Tensor v_state_detached = critic_net->forward(state_batch).detach();
-      torch::Tensor v_startStates_detached = critic_net->forward(startStates_batch).detach();
       torch::Tensor log_term_probs_batch = torch::stack(log_term_probs).unsqueeze(1).to(device);
       torch::Tensor log_continue_probs_batch = torch::stack(log_continue_probs).unsqueeze(1).to(device);
 
-      torch::Tensor behavior_loss = - torch::sum(terms_batch * Is_batch * ((cumulate_rewards_batch + torch::pow(gamma, taus_batch)
-                                    * v_state_detached - v_startStates_detached) * log_probs_batch) + entropy_fact * entropy_batch)
-                                    / torch::sum(terms_batch);
-
-      actor_losses[fTimeStep] = behavior_loss.item<float>();
-      Entropies[fTimeStep] = entropy_batch.mean().item<float>();
-      optimizer_behavior->zero_grad();
-      behavior_loss.backward();
-      for (auto& named_param : behavior_net->named_parameters()) {
+      torch::Tensor terminator_loss = - ((terms_batch * log_term_probs_batch + (1 - terms_batch) * log_continue_probs_batch) 
+                                      * td_errors.detach()).mean();
+      optimizer_terminator->zero_grad();
+      terminator_loss.backward();
+      for (auto& named_param : terminator_net->named_parameters()) {
         if (named_param.value().grad().defined()) {
-          eligibility_trace_behavior[named_param.key()].mul_(gamma * lambda_behavior).add_(named_param.value().grad());
-          named_param.value().mutable_grad() = eligibility_trace_behavior[named_param.key()];
+          eligibility_trace_terminator[named_param.key()].mul_(gamma * lambda_terminator).add_(named_param.value().grad());
+          named_param.value().mutable_grad() = eligibility_trace_terminator[named_param.key()];
         }
       }
-      optimizer_behavior->step();
-
-      //Terminator update
-      // torch::Tensor terminator_loss = - ((terms_batch * log_term_probs_batch + (1 - terms_batch) * log_continue_probs_batch) 
-      //                                 * td_errors.detach()).mean();
-      // optimizer_terminator->zero_grad();
-      // terminator_loss.backward();
-      // for (auto& named_param : terminator_net->named_parameters()) {
-      //   if (named_param.value().grad().defined()) {
-      //     eligibility_trace_terminator[named_param.key()].mul_(gamma * lambda_terminator).add_(named_param.value().grad());
-      //     named_param.value().mutable_grad() = eligibility_trace_terminator[named_param.key()];
-      //   }
-      // }
-      // optimizer_terminator->step();
+      optimizer_terminator->step();
 
     }catch (std::exception &ex) {
       LOGERR << "Error in training loop: " << ex.what() << std::endl;
