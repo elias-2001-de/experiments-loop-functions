@@ -67,8 +67,8 @@ void AACLoopFunction::Reset() {
     }
   }
 
-  optimizer_actor = std::make_shared<torch::optim::Adam>(actor_net->parameters(), torch::optim::AdamOptions(alpha_critic));
-  optimizer_critic = std::make_shared<torch::optim::Adam>(critic_net->parameters(), torch::optim::AdamOptions(alpha_actor));
+  optimizer_actor = std::make_shared<torch::optim::Adam>(actor_net->parameters(), torch::optim::AdamOptions(alpha_actor));
+  optimizer_critic = std::make_shared<torch::optim::Adam>(critic_net->parameters(), torch::optim::AdamOptions(alpha_critic));
   optimizer_critic->zero_grad();
   optimizer_actor->zero_grad();
   //std::cout << "[loop] actor device: " << actor_net->parameters().front().device() << std::endl;;
@@ -264,7 +264,6 @@ void AACLoopFunction::PreStep() {
   int i = 0;
 
   /// ACTOR DECISION
-  i = 0;
   for (auto it = cEntities.begin(); it != cEntities.end(); ++it) {
     CControllableEntity *pcEntity = any_cast<CControllableEntity *>(it->second);
     try {
