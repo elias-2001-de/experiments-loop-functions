@@ -120,6 +120,7 @@ class AACLoopFunction : public CoreLoopFunctions {
       int size_terminator_net;
 
       float gamma;
+      float I;
       float lambda_critic;
       float alpha_critic;
       float lambda_behavior;
