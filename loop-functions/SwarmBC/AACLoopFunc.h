@@ -110,15 +110,20 @@ class AACLoopFunction : public CoreLoopFunctions {
       std::vector<float> value_param;
       std::vector<float> behavior_param;
       std::vector<float> terminator_param;
+      
+      std::vector<float> Is;
+      std::vector<int> taus;
 
       std::vector<torch::Tensor> states;
       std::vector<torch::Tensor> states_prime;
-      std::vector<torch::Tensor> observations;
+      std::vector<torch::Tensor> init_states;
+      std::vector<torch::Tensor> cumul_rewards;
 
       int size_value_net;
       int size_behavior_net;
       int size_terminator_net;
 
+      float I;
       float gamma;
       float lambda_critic;
       float alpha_critic;

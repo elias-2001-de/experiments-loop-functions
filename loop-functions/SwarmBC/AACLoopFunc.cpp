@@ -84,9 +84,10 @@ void AACLoopFunction::Reset() {
   optimizer_critic->zero_grad();
   optimizer_behavior->zero_grad();
   optimizer_terminator->zero_grad();
-  //std::cout << "[loop] actor device: " << actor_net->parameters().front().device() << std::endl;;
-  //std::cout << "[loop] critic device: " << critic_net->parameters().front().device() << std::endl;;
+  I = 1;
 
+  taus.assign(nb_robots, 0);
+  Is.assign(nb_robots, 1);
   
   TDerrors.resize(mission_length);
   std::fill(TDerrors.begin(), TDerrors.end(), 0.0f);
@@ -138,31 +139,12 @@ void AACLoopFunction::Init(TConfigurationNode& t_tree) {
   GetNodeAttribute(actorParameters, "alpha_actor", alpha_behavior);
   GetNodeAttribute(actorParameters, "entropy", entropy_fact);
 
-  behavior_net = dynamic_cast<argos::CEpuckNNController::Behavior*>(behavior_net);
-  terminator_net = dynamic_cast<argos::CEpuckNNController::Terminator*>(terminator_net);
-  n_sensors = 22;
-
   TConfigurationNode frameworkNode;
   TConfigurationNode experimentNode;
   frameworkNode = GetNode(parentNode, "framework");
   experimentNode = GetNode(frameworkNode, "experiment");
   GetNodeAttribute(experimentNode, "length", mission_length);
   mission_length *= 10;
-  observations.resize(nb_robots, torch::zeros({n_sensors}, device));
-  all_module_probabilities.resize(nb_robots, torch::zeros({6}, device));
-  termination_probabilities.resize(nb_robots);
-  selected_modules.resize(nb_robots);
-
-  CSpace::TMapPerType cEntities = GetSpace().GetEntitiesByType("controller");
-  for (auto it = cEntities.begin(); it != cEntities.end(); ++it) {
-    CControllableEntity *pcEntity = any_cast<CControllableEntity *>(it->second);
-    try {
-        CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
-        cController.SetDevice(device);
-    } catch (std::exception &ex) {
-        LOGERR << "Error while setting device: " << ex.what() << std::endl;
-    }
-  }
 }
 
 /****************************************/
@@ -187,7 +169,265 @@ argos::CColor AACLoopFunction::GetFloorColor(const argos::CVector2& c_position_o
 /****************************************/
 
 void AACLoopFunction::PreStep() {
-  if (fTimeStep == 0 || not training)
+  int N = (critic_input_dim - 4)/5; // Number of closest neighbors to consider (4 absolute states + 5 relative states)
+  std::vector<torch::Tensor> positions;
+  CSpace::TMapPerType& tEpuckMap = GetSpace().GetEntitiesByType("epuck");
+  CVector2 cEpuckPosition(0,0), other_position(0,0);
+  CRadians cRoll, cPitch, cYaw, other_yaw;
+  std::vector<torch::Tensor> rewards;
+   
+  for (CSpace::TMapPerType::iterator it = tEpuckMap.begin(); it != tEpuckMap.end(); ++it) {
+    CEPuckEntity* pcEpuck = any_cast<CEPuckEntity*>(it->second);
+    cEpuckPosition.Set(pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetX(),
+                       pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetY());
+                       
+    pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Orientation.ToEulerAngles(cYaw, cPitch, cRoll);
+
+    // Collect positions and orientations of other e-pucks
+    std::vector<std::pair<CVector2, CRadians>> all_positions;
+    CQuaternion cEpuckOrientation;
+    for (CSpace::TMapPerType::iterator jt = tEpuckMap.begin(); jt != tEpuckMap.end(); ++jt) {
+      if (jt != it) {
+        CEPuckEntity* pcOtherEpuck = any_cast<CEPuckEntity*>(jt->second);
+        other_position.Set(pcOtherEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetX(),
+                           pcOtherEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetY());
+
+        pcOtherEpuck->GetEmbodiedEntity().GetOriginAnchor().Orientation.ToEulerAngles(other_yaw, cPitch, cRoll);
+        all_positions.emplace_back(other_position, other_yaw);
+      }
+    }
+
+    // Compute relative positions and orientations
+    std::vector<RelativePosition> relatives = compute_relative_positions(cEpuckPosition, cYaw, all_positions);
+
+    // Sort by distance and pick the N closest
+    std::nth_element(relatives.begin(), relatives.begin() + N, relatives.end(), [](const RelativePosition& a, const RelativePosition& b) {
+      return a.distance < b.distance;
+    });
+
+    // Create state tensor for the current e-puck
+    torch::Tensor pos = torch::empty({critic_input_dim});
+    pos[0] = cEpuckPosition.GetX();
+    pos[1] = cEpuckPosition.GetY();
+    pos[2] = std::cos(cYaw.GetValue());
+    pos[3] = std::sin(cYaw.GetValue());
+    int index = 4;
+
+    // Iterate only over the first N elements of relatives
+    for (int i = 0; i < N; ++i) {
+      const auto& rel = relatives[i];
+      pos[index++] = rel.distance;
+      pos[index++] = std::cos(rel.angle);
+      pos[index++] = std::sin(rel.angle);
+      pos[index++] = std::cos(rel.relative_yaw);
+      pos[index++] = std::sin(rel.relative_yaw);
+    }
+
+    positions.push_back(pos);
+
+    // Reward computation
+    float reward = 0.0;
+    Real fDistanceSpot = (m_cCoordBlackSpot - cEpuckPosition).Length();
+    if (fDistanceSpot <= m_fRadius) {
+      reward = 1.0;
+    } else {
+      reward = 0; //std::pow(10, -3 * fDistanceSpot / m_fDistributionRadius);
+    }
+    rewards.push_back(torch::tensor(reward));
+    m_fObjectiveFunction += reward;
+  }
+
+  if (fTimeStep == 0)
+  {
+    states.clear(); 
+    init_states.clear();
+    for (const auto& state : positions)
+    {
+      states.push_back(state.clone());
+      init_states.push_back(state.clone());
+    }
+
+    cumul_rewards.clear();
+    for (const auto& reward : rewards)
+    {
+      cumul_rewards.push_back(reward.clone());  
+    }
+
+    for (auto& tau : taus) tau += 1;  
+
+    CSpace::TMapPerType cEntities = GetSpace().GetEntitiesByType("controller");
+    /// ACTOR DECISION
+    for (CSpace::TMapPerType::iterator it = cEntities.begin();
+        it != cEntities.end(); ++it) {
+      CControllableEntity *pcEntity = any_cast<CControllableEntity *>(it->second);
+      try {
+        CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
+        cController.SetNetworks(behavior_net, terminator_net, device_type);
+      } catch (std::exception &ex) {
+        LOGERR << "Error while setting network: " << ex.what() << std::endl;
+      }
+    }
+
+    fTimeStep += 1;
+  }else
+  {
+    if (training) {
+      try{
+        states_prime.clear();
+        for (const auto& state : positions)
+        {
+          states_prime.push_back(state.clone());
+        }
+
+        torch::Tensor state_batch = torch::stack(states).to(device);
+        torch::Tensor next_state_batch = torch::stack(states_prime).to(device);
+
+        // Forward passes
+        torch::Tensor v_state = critic_net->forward(state_batch);
+        torch::Tensor v_state_prime = critic_net->forward(next_state_batch);
+        
+
+        // Adjust for the terminal state
+        if (fTimeStep + 1 == mission_length) {
+            v_state_prime = torch::zeros_like(v_state_prime);
+        }
+
+        // TD error
+        torch::Tensor reward_batch = torch::stack(rewards).unsqueeze(1).to(device);
+        torch::Tensor td_errors = reward_batch + gamma * v_state_prime - v_state;
+        
+        TDerrors[fTimeStep] = td_errors.mean().item<float>();
+
+        // Critic Loss
+        torch::Tensor critic_loss = td_errors.pow(2).mean();
+        critic_losses[fTimeStep] = critic_loss.item<float>();
+
+        // Backward and optimize for critic
+        optimizer_critic->zero_grad();
+        critic_loss.backward();
+        // Update eligibility traces and gradients
+        for (auto& named_param : critic_net->named_parameters()) {
+          auto& param = named_param.value();
+          if (param.grad().defined()) {
+            auto& eligibility = eligibility_trace_critic[named_param.key()];
+            eligibility.mul_(gamma * lambda_critic).add_(param.grad());
+            param.mutable_grad() = eligibility.clone();
+          }
+        }
+        optimizer_critic->step();
+
+        // Prepare for policy update
+        std::vector<torch::Tensor> log_probs;
+        std::vector<torch::Tensor> entropies;
+        std::vector<torch::Tensor> init_states_term;
+        std::vector<torch::Tensor> states_term; 
+        std::vector<torch::Tensor> rewards_term; 
+        std::vector<torch::Tensor> gammas; 
+        std::vector<torch::Tensor> Is_term; 
+        CSpace::TMapPerType cEntities = GetSpace().GetEntitiesByType("controller"); 
+        int i = 0;
+        for (CSpace::TMapPerType::iterator it = cEntities.begin();
+            it != cEntities.end(); ++it) {
+          CControllableEntity *pcEntity = any_cast<CControllableEntity *>(it->second);      
+          CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
+          if(cController.GetTerm()){
+            log_probs.push_back(cController.GetPolicyLogProbs().to(device)); 
+            entropies.push_back(cController.GetPolicyEntropy().to(device)); 
+            int selected_module = cController.GetSelectedModule();
+            behav_hist[selected_module] += 1;
+
+            init_states_term.push_back(init_states[i].clone());
+            states_term.push_back(states_prime[i].clone());
+            rewards_term.push_back(cumul_rewards[i].clone());
+            gammas.push_back(torch::tensor(pow(gamma, taus[i])));
+            Is_term.push_back(torch::tensor(Is[i]));
+
+            // reset this robot's variable
+            init_states[i] = positions[i];
+            cumul_rewards[i] -= cumul_rewards[i];
+            taus[i] = 0;
+            Is[i] *= gamma;
+          }
+          i++;
+        }
+
+        // Compute TD errors for policy update
+        torch::Tensor state_term_batch = torch::stack(states_term);
+        torch::Tensor init_states_term_batch = torch::stack(init_states_term);
+        torch::Tensor v_state_term = critic_net->forward(state_term_batch);
+        torch::Tensor v_init_state_term = critic_net->forward(init_states_term_batch);
+
+        torch::Tensor reward_term_batch = torch::stack(rewards_term).unsqueeze(1);
+        torch::Tensor gammas_batch = torch::stack(gammas).unsqueeze(1);
+        torch::Tensor Is_batch = torch::stack(Is_term).unsqueeze(1);
+
+        torch::Tensor TD_errors = reward_term_batch + gammas_batch * v_state_term - v_init_state_term;
+
+        // Calculate policy loss using the per-robot TD error times the logprob
+        torch::Tensor log_probs_batch = torch::stack(log_probs).unsqueeze(1);
+        torch::Tensor policy_loss = -(Is_batch * log_probs_batch * TD_errors.detach()).mean();
+
+        // Add entropy term for better exploration
+        torch::Tensor entropy_batch = torch::stack(entropies).unsqueeze(1);
+        policy_loss -= entropy_fact * (Is_batch * entropy_batch).mean();
+        
+        policy_loss -= entropy_fact * entropy_batch.mean();
+
+        actor_losses[fTimeStep] = policy_loss.item<float>();
+        Entropies[fTimeStep] = entropy_batch.mean().item<float>();
+
+        // Backward and optimize for actor
+        optimizer_behavior->zero_grad();
+        policy_loss.backward();
+        // Update eligibility traces and gradients
+        for (auto& named_param : behavior_net->named_parameters()) {
+            auto& param = named_param.value();
+            if (param.grad().defined()) {
+                auto& eligibility = eligibility_trace_behavior[named_param.key()];
+                eligibility.mul_(gamma * lambda_behavior).add_(param.grad());
+                param.mutable_grad() = eligibility.clone();
+            }
+        }
+        optimizer_behavior->step();
+
+        for (int j = 0; j < cumul_rewards.size(); ++j)
+        {
+          cumul_rewards[j] += pow(gamma,taus[j]) * rewards[j].clone();  
+        }
+
+        for (auto& tau : taus) tau += 1;  
+        
+      }catch (std::exception &ex) {
+        LOGERR << "Error in training loop: " << ex.what() << std::endl;
+      }
+    }
+    
+    states.clear();
+    for (const auto& state : positions)
+    {
+      states.push_back(state.clone());
+    }
+    
+    // Launch the experiment with the correct random seed and network,
+    // and evaluate the average fitness
+    CSpace::TMapPerType cEntities = GetSpace().GetEntitiesByType("controller");
+    /// ACTOR DECISION
+    for (CSpace::TMapPerType::iterator it = cEntities.begin();
+        it != cEntities.end(); ++it) {
+      CControllableEntity *pcEntity = any_cast<CControllableEntity *>(it->second);
+      try {
+        CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
+        cController.SetNetworks(behavior_net, terminator_net, device_type);
+      } catch (std::exception &ex) {
+        LOGERR << "Error while setting network: " << ex.what() << std::endl;
+      }
+    }
+
+    fTimeStep += 1;
+  }
+
+/*
+  if (fTimeStep == 0)
   {
     std::vector<torch::Tensor> positions;
     CSpace::TMapPerType& tEpuckMap = GetSpace().GetEntitiesByType("epuck");
@@ -282,6 +522,7 @@ void AACLoopFunction::PreStep() {
         LOGERR << "Error while deciding termination: " << ex.what() << std::endl;
     }
   }
+*/
 }
 
 
@@ -289,6 +530,7 @@ void AACLoopFunction::PreStep() {
 /****************************************/
 
 void AACLoopFunction::PostStep() {
+  /*
   if(training){
     std::vector<torch::Tensor> positions;
     CSpace::TMapPerType& tEpuckMap = GetSpace().GetEntitiesByType("epuck");
@@ -457,6 +699,7 @@ void AACLoopFunction::PostStep() {
     states = states_prime;
   }
   fTimeStep += 1;
+*/
 } 
 
 /****************************************/
