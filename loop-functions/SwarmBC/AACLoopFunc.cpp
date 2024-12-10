@@ -279,10 +279,92 @@ void AACLoopFunction::PreStep() {
           states_prime.push_back(state.clone());
         }
 
-        torch::Tensor state_batch = torch::stack(states).to(device);
-        torch::Tensor next_state_batch = torch::stack(states_prime).to(device);
+        // Prepare for policy update
+        std::vector<torch::Tensor> log_term_probs;
+        std::vector<torch::Tensor> log1_term_probs;
+        std::vector<torch::Tensor> log_probs;
+        std::vector<torch::Tensor> entropies;
+        std::vector<torch::Tensor> init_states_term;
+        std::vector<torch::Tensor> states_term; 
+        std::vector<torch::Tensor> rewards_term; 
+        std::vector<torch::Tensor> gammas; 
+        std::vector<torch::Tensor> Is_term; 
+        std::vector<torch::Tensor> term; 
+        std::vector<torch::Tensor> term1; 
+        CSpace::TMapPerType cEntities = GetSpace().GetEntitiesByType("controller"); 
+        int i = 0;
+        for (CSpace::TMapPerType::iterator it = cEntities.begin();
+            it != cEntities.end(); ++it) {
+          CControllableEntity *pcEntity = any_cast<CControllableEntity *>(it->second);      
+          CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
+          log_term_probs.push_back(cController.GetTermLogProbs().to(device));
+          log1_term_probs.push_back(cController.GetTermLog1Probs().to(device));
+          term1.push_back(torch::tensor(1).to(device));
+          if(cController.GetTerm()){
+            term.push_back(torch::tensor(1).to(device));
+
+            log_probs.push_back(cController.GetPolicyLogProbs().to(device)); 
+            entropies.push_back(cController.GetPolicyEntropy().to(device)); 
+            int selected_module = cController.GetSelectedModule();
+            behav_hist[selected_module] += 1;
+
+            init_states_term.push_back(init_states[i].clone().to(device));
+            states_term.push_back(states_prime[i].clone().to(device));
+            rewards_term.push_back(cumul_rewards[i].clone().to(device));
+            gammas.push_back(torch::tensor(pow(gamma, taus[i])).to(device));
+            Is_term.push_back(torch::tensor(Is[i]).to(device));
+
+            // reset this robot's variable
+            init_states[i] = positions[i];
+            cumul_rewards[i] -= cumul_rewards[i];
+            taus[i] = 0;
+            Is[i] *= gamma;
+          }else{
+            term.push_back(torch::tensor(0).to(device));
+          }
+          i++;
+        }
+
+        // Compute TD errors for policy update
+        torch::Tensor state_term_batch = torch::stack(states_term).to(device);
+        torch::Tensor init_states_term_batch = torch::stack(init_states_term).to(device);
+        torch::Tensor v_state_term = critic_net->forward(state_term_batch);
+        torch::Tensor v_init_state_term = critic_net->forward(init_states_term_batch);
+
+        torch::Tensor reward_term_batch = torch::stack(rewards_term).unsqueeze(1).to(device);
+        torch::Tensor gammas_batch = torch::stack(gammas).unsqueeze(1).to(device);
+        torch::Tensor Is_batch = torch::stack(Is_term).unsqueeze(1).to(device);
+
+        torch::Tensor TD_errors = reward_term_batch + gammas_batch * v_state_term - v_init_state_term;
+
+        // Calculate policy loss using the per-robot TD error times the logprob
+        torch::Tensor log_probs_batch = torch::stack(log_probs).unsqueeze(1);
+        torch::Tensor policy_loss = -(Is_batch * log_probs_batch * TD_errors.detach()).mean();
+
+        // Add entropy term for better exploration
+        torch::Tensor entropy_batch = torch::stack(entropies).unsqueeze(1);
+        policy_loss -= entropy_fact * (Is_batch * entropy_batch).mean();
+        
+        actor_losses[fTimeStep] = policy_loss.item<float>();
+        Entropies[fTimeStep] = entropy_batch.mean().item<float>();
+
+        // Backward and optimize for behavior
+        optimizer_behavior->zero_grad();
+        policy_loss.backward();
+        // Update eligibility traces and gradients
+        for (auto& named_param : behavior_net->named_parameters()) {
+            auto& param = named_param.value();
+            if (param.grad().defined()) {
+                auto& eligibility = eligibility_trace_behavior[named_param.key()];
+                eligibility.mul_(gamma * lambda_behavior).add_(param.grad());
+                param.mutable_grad() = eligibility.clone();
+            }
+        }
+        optimizer_behavior->step();
 
         // Forward passes
+        torch::Tensor state_batch = torch::stack(states).to(device);
+        torch::Tensor next_state_batch = torch::stack(states_prime).to(device);
         torch::Tensor v_state = critic_net->forward(state_batch);
         torch::Tensor v_state_prime = critic_net->forward(next_state_batch);
         
@@ -316,79 +398,28 @@ void AACLoopFunction::PreStep() {
         }
         optimizer_critic->step();
 
-        // Prepare for policy update
-        std::vector<torch::Tensor> log_probs;
-        std::vector<torch::Tensor> entropies;
-        std::vector<torch::Tensor> init_states_term;
-        std::vector<torch::Tensor> states_term; 
-        std::vector<torch::Tensor> rewards_term; 
-        std::vector<torch::Tensor> gammas; 
-        std::vector<torch::Tensor> Is_term; 
-        CSpace::TMapPerType cEntities = GetSpace().GetEntitiesByType("controller"); 
-        int i = 0;
-        for (CSpace::TMapPerType::iterator it = cEntities.begin();
-            it != cEntities.end(); ++it) {
-          CControllableEntity *pcEntity = any_cast<CControllableEntity *>(it->second);      
-          CEpuckNNController& cController = dynamic_cast<CEpuckNNController&>(pcEntity->GetController());
-          if(cController.GetTerm()){
-            log_probs.push_back(cController.GetPolicyLogProbs().to(device)); 
-            entropies.push_back(cController.GetPolicyEntropy().to(device)); 
-            int selected_module = cController.GetSelectedModule();
-            behav_hist[selected_module] += 1;
+        // Compute terminator loss function
+        torch::Tensor term_batch = torch::stack(term).unsqueeze(1);
+        torch::Tensor term1_batch = torch::stack(term1).unsqueeze(1);
+        torch::Tensor log_term_probs_batch = torch::stack(log_term_probs).unsqueeze(1);
+        torch::Tensor log1_term_probs_batch = torch::stack(log1_term_probs).unsqueeze(1);
 
-            init_states_term.push_back(init_states[i].clone());
-            states_term.push_back(states_prime[i].clone());
-            rewards_term.push_back(cumul_rewards[i].clone());
-            gammas.push_back(torch::tensor(pow(gamma, taus[i])));
-            Is_term.push_back(torch::tensor(Is[i]));
+        torch::Tensor term_loss = ((term_batch * log_term_probs_batch + term1_batch * log1_term_probs_batch) 
+                                  * td_errors.detach()).mean();
 
-            // reset this robot's variable
-            init_states[i] = positions[i];
-            cumul_rewards[i] -= cumul_rewards[i];
-            taus[i] = 0;
-            Is[i] *= gamma;
-          }
-          i++;
-        }
-
-        // Compute TD errors for policy update
-        torch::Tensor state_term_batch = torch::stack(states_term);
-        torch::Tensor init_states_term_batch = torch::stack(init_states_term);
-        torch::Tensor v_state_term = critic_net->forward(state_term_batch);
-        torch::Tensor v_init_state_term = critic_net->forward(init_states_term_batch);
-
-        torch::Tensor reward_term_batch = torch::stack(rewards_term).unsqueeze(1);
-        torch::Tensor gammas_batch = torch::stack(gammas).unsqueeze(1);
-        torch::Tensor Is_batch = torch::stack(Is_term).unsqueeze(1);
-
-        torch::Tensor TD_errors = reward_term_batch + gammas_batch * v_state_term - v_init_state_term;
-
-        // Calculate policy loss using the per-robot TD error times the logprob
-        torch::Tensor log_probs_batch = torch::stack(log_probs).unsqueeze(1);
-        torch::Tensor policy_loss = -(Is_batch * log_probs_batch * TD_errors.detach()).mean();
-
-        // Add entropy term for better exploration
-        torch::Tensor entropy_batch = torch::stack(entropies).unsqueeze(1);
-        policy_loss -= entropy_fact * (Is_batch * entropy_batch).mean();
-        
-        policy_loss -= entropy_fact * entropy_batch.mean();
-
-        actor_losses[fTimeStep] = policy_loss.item<float>();
-        Entropies[fTimeStep] = entropy_batch.mean().item<float>();
-
-        // Backward and optimize for actor
-        optimizer_behavior->zero_grad();
-        policy_loss.backward();
+        // Backward and optimize for terminator
+        optimizer_terminator->zero_grad();
+        term_loss.backward();
         // Update eligibility traces and gradients
-        for (auto& named_param : behavior_net->named_parameters()) {
+        for (auto& named_param : terminator_net->named_parameters()) {
             auto& param = named_param.value();
             if (param.grad().defined()) {
-                auto& eligibility = eligibility_trace_behavior[named_param.key()];
-                eligibility.mul_(gamma * lambda_behavior).add_(param.grad());
+                auto& eligibility = eligibility_trace_terminator[named_param.key()];
+                eligibility.mul_(gamma * lambda_terminator).add_(param.grad());
                 param.mutable_grad() = eligibility.clone();
             }
         }
-        optimizer_behavior->step();
+        optimizer_terminator->step();
 
         for (int j = 0; j < cumul_rewards.size(); ++j)
         {
