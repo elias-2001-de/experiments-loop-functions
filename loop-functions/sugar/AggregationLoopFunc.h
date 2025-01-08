@@ -1,5 +1,5 @@
 /**
-  * @file <loop-functions/example/ExampleAggregationLoopFunc.h>
+  * @file <loop-functions/sugar/AggregationLoopFunc.h>
   *
   * @author Antoine Ligot - <aligot@ulb.ac.be>
   *
@@ -8,21 +8,23 @@
   * @license MIT License
   */
 
-#ifndef EXAMPLE_AGGREGATION_LOOP_FUNC
-#define EXAMPLE_AGGREGATION_LOOP_FUNC
+#ifndef AGGREGATION_LOOP_FUNC
+#define AGGREGATION_LOOP_FUNC
 
 #include "../../src/CoreLoopFunctions.h"
 #include <argos3/core/simulator/space/space.h>
 #include <argos3/core/simulator/loop_functions.h>
 #include <argos3/plugins/robots/e-puck/simulator/epuck_entity.h>
+#include <argos3/core/control_interface/ci_controller.h>
+#include "../../../ARGoS3-AutoMoDe/src/core/AutoMoDePatchController.h"
 
 using namespace argos;
 
-class ExampleAggregationLoopFunction: public CoreLoopFunctions {
+class AggregationLoopFunction: public CoreLoopFunctions {
   public:
-    ExampleAggregationLoopFunction();
-    ExampleAggregationLoopFunction(const ExampleAggregationLoopFunction& orig);
-    virtual ~ExampleAggregationLoopFunction();
+    AggregationLoopFunction();
+    AggregationLoopFunction(const AggregationLoopFunction& orig);
+    virtual ~AggregationLoopFunction();
     
     virtual void Init(argos::TConfigurationNode& t_tree);
 
@@ -30,7 +32,7 @@ class ExampleAggregationLoopFunction: public CoreLoopFunctions {
     virtual void Reset();
 
     virtual argos::CColor GetFloorColor(const argos::CVector2& c_position_on_plane);
-    virtual void PostExperiment();
+    virtual void PostStep();
     
 
     Real GetObjectiveFunction();
@@ -44,13 +46,15 @@ class ExampleAggregationLoopFunction: public CoreLoopFunctions {
   private:
     Real m_fRadius;
     CVector2 m_cCoordBlackSpot;
+    CVector2 m_cCoordWhiteSpot;
 
     UInt32 m_unScoreSpot;
     Real m_fObjectiveFunction;
 
     std::string to_find = "patch";
 
-    std::vector<CVector3> list_of_patch_positions = { CVector3(0, 0, 0) };
+    std::vector<CVector3> list_of_patch_positions = { CVector3(0, 0.6, 0), CVector3(0, -0.6, 0) };
+    std::vector<UInt8> list_of_colors = { 1, 2 };
 };
 
 #endif

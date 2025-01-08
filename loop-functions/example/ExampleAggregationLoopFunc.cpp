@@ -38,6 +38,29 @@ void ExampleAggregationLoopFunction::Destroy() {}
 /****************************************/
 /****************************************/
 
+void ExampleAggregationLoopFunction::Init(argos::TConfigurationNode& t_tree) {
+	CoreLoopFunctions::Init(t_tree);
+	CSpace::TMapPerType& tEpuckMap = GetSpace().GetEntitiesByType("epuck");
+	int i = 0;
+	for (CSpace::TMapPerType::iterator it = tEpuckMap.begin(); it != tEpuckMap.end(); ++it) {
+		CEPuckEntity* pcEpuck = any_cast<CEPuckEntity*>(it->second);
+		std::string str = pcEpuck->GetId();
+
+		// Find the position of the substring patch if it is in the ID
+    		size_t pos = str.find(to_find);
+
+		if (pos != std::string::npos) {
+			MoveEntity(pcEpuck->GetEmbodiedEntity(),
+					list_of_patch_positions.at(i),
+				       	CQuaternion().FromEulerAngles(m_pcRng->Uniform(CRange<CRadians>(CRadians::ZERO,CRadians::TWO_PI)),
+                            CRadians::ZERO,CRadians::ZERO),false);
+		}
+	}
+}	
+		
+/****************************************/
+/****************************************/
+
 void ExampleAggregationLoopFunction::Reset() {
   m_fObjectiveFunction = 0;
   m_unScoreSpot = 0;
