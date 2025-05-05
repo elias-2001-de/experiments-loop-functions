@@ -129,6 +129,8 @@ void ForagingTwoSpotsLoopFunction::Reset() {
 void ForagingTwoSpotsLoopFunction::PostStep() {
   UInt32 score_temp = m_fObjectiveFunction;
 
+
+  int count = 0;
   CSpace::TMapPerType& tEpuckMap = GetSpace().GetEntitiesByType("epuck");
   CVector2 cEpuckPosition(0,0);
   for (CSpace::TMapPerType::iterator it = tEpuckMap.begin(); it != tEpuckMap.end(); ++it) {
@@ -152,6 +154,12 @@ void ForagingTwoSpotsLoopFunction::PostStep() {
       m_mapFoodData[strRobotId] = 0;
       // LOG << "Obj " << m_fObjectiveFunction << std::endl;
     }
+
+
+    std::cout << "%! id:" << count;
+    std::cout << " x:" << pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetX();
+    std::cout << " y:" << pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetY() << std::endl;
+    count++;
   }
   if (score_temp != m_fObjectiveFunction) {
      //LOGERR << "Obj " << m_fObjectiveFunction << std::endl;
