@@ -81,9 +81,15 @@ void ChocolateAACLoopFunction::PostStep()
     cEpuckPosition.Set(pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetX(),
                        pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetY());
 
+    auto x = pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetX();
+    auto y = pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetY();
+    argos::CVector2 vec_pos(x, y);
+    auto col = GetFloorColor(vec_pos);
+
     std::cout << "%! id:" << count;
-    std::cout << " x:" << pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetX();
-    std::cout << " y:" << pcEpuck->GetEmbodiedEntity().GetOriginAnchor().Position.GetY() << std::endl;
+    std::cout << " x:" << x;
+    std::cout << " y:" << y;
+    std::cout << " col:" << col << std::endl;
     count++;
 
     Real fDistanceSpot = (m_cCoordBlackSpot - cEpuckPosition).Length();
